@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 
+tf.compat.v1.disable_eager_execution()
+
 class SingleHospital:
     def __init__(self, n_types, dist_lst):
         ''' Takes in number of pair types along with a list of functions that
@@ -73,7 +75,7 @@ biases = []
 
 activation = [tf.nn.tanh] * (num_layers - 1) + [tf.nn.tanh]
 
-with tf.variable_scope("alloc_mech"):
+with tf.compat.v1.variable_scope("alloc_mech"):
     # Creating input layer weights
     print("Creating weights for layer: 1")
     print([neurons[0], neurons[1]])
@@ -219,7 +221,7 @@ u_mask = create_u_mask([(0,1)], n_types, n_hos)
 
 alt_sample_size = 1000
 X = tf.compat.v1.placeholder(tf.float64, [batch_size, n_hos * n_types], name='features')
-alt_sample = tf.Variable(np.reshape(next(gen.generate_report(alt_sample_size)), (alt_sample_size, n_hos, n_types)), 
+alt_sample = tf.compat.v1.Variable(np.reshape(next(gen.generate_report(alt_sample_size)), (alt_sample_size, n_hos, n_types)), 
                          dtype=tf.float64, trainable=False)
 
 misreports, og = best_sample_misreport(tf.reshape(X, [batch_size, n_hos, n_types]),
@@ -240,17 +242,17 @@ best_mis = get_best_mis(mis_util, mis_u_mask) # [n_hos, batch_size, n_hos]
 mis_diff = tf.nn.relu(best_mis - tf.tile(tf.expand_dims(util, 0), [n_hos, 1, 1]))
 rgt = tf.reduce_mean(tf.reduce_max(mis_diff, axis=0), axis=0) # reduce max since only utility is from bidder i 
 
-penalty_weight = tf.Variable(.1, dtype=tf.float64, trainable=False)
-lagr_mults = tf.Variable(np.ones(n_hos).astype(np.float64) * 1.0)
+penalty_weight = tf.compat.v1.Variable(.1, dtype=tf.float64, trainable=False)
+lagr_mults = tf.compat.v1.Variable(np.ones(n_hos).astype(np.float64) * 1.0)
 rgt_loss = penalty_weight * tf.reduce_sum(tf.square(rgt)) / 2.0 # quadratic penalty term
 lagr_loss = tf.reduce_sum(rgt * lagr_mults) # lagrange multiplier penalty term
 mean_tot_util = tf.reduce_mean(tf.reduce_sum(util, axis=1))
 total_loss = -mean_tot_util + rgt_loss + lagr_loss
 
-main_opt = tf.train.AdamOptimizer(learn_rate)
-lagr_opt = tf.train.GradientDescentOptimizer(penalty_weight)
+main_opt = tf.compat.v1.train.AdamOptimizer(learn_rate)
+lagr_opt = tf.compat.v1.train.GradientDescentOptimizer(penalty_weight)
 
-mech_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
+mech_vars = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
 main_train_step = main_opt.minimize(total_loss, var_list=mech_vars)
 
 lagr_train_step = lagr_opt.minimize(-lagr_loss, var_list=lagr_mults)
