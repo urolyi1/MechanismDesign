@@ -37,12 +37,6 @@ def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
         hos_lst.append(SingleHospital(n_types, tmp_dist_lst))
     gen = ReportGenerator(hos_lst, (n_hos, n_types))
     return gen
-
-
-low_lst_lst = [[5, 10],[20, 40],[40, 80]]
-high_lst_lst = [[10, 20], [40, 80], [80, 160]]
-gen = create_simple_generator(low_lst_lst, high_lst_lst, 3, 2)
-
 def create_u_mask(compat_lst, n_types, n_hos):
     '''
     Create mask matrix that will only reward valid matchings making the rest 0
@@ -55,10 +49,15 @@ def create_u_mask(compat_lst, n_types, n_hos):
         mask[:, t2, t1] = 1.0
     return mask
 
-learn_rate = 0.01
+## Generator creation ##
+low_lst_lst = [[5, 10],[20, 40],[40, 80]]
+high_lst_lst = [[10, 20], [40, 80], [80, 160]]
+gen = create_simple_generator(low_lst_lst, high_lst_lst, 3, 2)
+
+learn_rate = 0.005
 n_hos = 3
 n_types = 2
-batch_size = 10
+batch_size = 100
 
 n_features = n_hos * n_types
 n_out = n_hos * n_types * n_types 
@@ -74,66 +73,73 @@ biases = []
 
 activation = [tf.nn.tanh] * (num_layers - 1) + [tf.nn.tanh]
 
-# Creating input layer weights
-print("Creating weights for layer: 1")
-print([neurons[0], neurons[1]])
-weights.append(tf.compat.v1.get_variable('w_a_1', [neurons[0], neurons[1]], initializer=init, dtype=tf.float64))
+with tf.variable_scope("alloc_mech"):
+    # Creating input layer weights
+    print("Creating weights for layer: 1")
+    print([neurons[0], neurons[1]])
+    weights.append(tf.compat.v1.get_variable('w_a_1', [neurons[0], neurons[1]], initializer=init, dtype=tf.float64))
 
 
-# Creating hidden layers
-for i in range(1, num_layers - 2):
-    print("Creating weights for layer: {}".format(i+1))
-    print([neurons[i], neurons[i + 1]])
-    weights.append(tf.compat.v1.get_variable('w_a_' + str(i+1), [neurons[i], neurons[i + 1]], initializer=init, dtype=tf.float64))
+    # Creating hidden layers
+    for i in range(1, num_layers - 2):
+        print("Creating weights for layer: {}".format(i+1))
+        print([neurons[i], neurons[i + 1]])
+        weights.append(tf.compat.v1.get_variable('w_a_' + str(i+1), [neurons[i], neurons[i + 1]],
+                                                 initializer=init, dtype=tf.float64))
 
-# need two outputs
-print("Creating weights for layer: {}".format(num_layers - 1))
-print([neurons[-2], neurons[-1]])
-weights.append(tf.compat.v1.get_variable('w_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]], initializer=init, dtype=tf.float64))
-w_prime = tf.compat.v1.get_variable('wi_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]], initializer=init, dtype=tf.float64)
+    # need two outputs
+    print("Creating weights for layer: {}".format(num_layers - 1))
+    print([neurons[-2], neurons[-1]])
+    weights.append(tf.compat.v1.get_variable('w_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]],
+                                             initializer=init, dtype=tf.float64))
+    w_prime = tf.compat.v1.get_variable('wi_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]],
+                                        initializer=init, dtype=tf.float64)
 
 
-# Biases
-for i in range(num_layers - 2):
-    print("Creating biases for layer: {}".format(i+1))
-    biases.append(tf.compat.v1.get_variable('b_a_' + str(i+1), [neurons[i + 1]], initializer=init, dtype=tf.float64))
+    # Biases
+    for i in range(num_layers - 2):
+        print("Creating biases for layer: {}".format(i+1))
+        biases.append(tf.compat.v1.get_variable('b_a_' + str(i+1), [neurons[i + 1]],
+                                                initializer=init, dtype=tf.float64))
 
-print("Creating biases for layer: {}".format(num_layers - 1))
-biases.append(tf.compat.v1.get_variable('b_a_' + str(num_layers - 1), [neurons[-1]], initializer=init, dtype=tf.float64))
-b_prime = tf.compat.v1.get_variable('bi_a_' + str(num_layers - 1), [neurons[-1]], initializer=init, dtype=tf.float64)
+    print("Creating biases for layer: {}".format(num_layers - 1))
+    biases.append(tf.compat.v1.get_variable('b_a_' + str(num_layers - 1), [neurons[-1]],
+                                            initializer=init, dtype=tf.float64))
+    b_prime = tf.compat.v1.get_variable('bi_a_' + str(num_layers - 1), [neurons[-1]],
+                                        initializer=init, dtype=tf.float64)
 
 def feedforward(X):
-    x_in = tf.reshape(X, [-1, neurons[0]])
+        x_in = tf.reshape(X, [-1, neurons[0]])
 
-    a = tf.nn.relu(tf.matmul(x_in, weights[0]) + biases[0], 'alloc_act_0')
+        a = tf.nn.relu(tf.matmul(x_in, weights[0]) + biases[0], 'alloc_act_0')
 
-    # push through hidden layers
-    for i in range(1, num_layers - 2):
-        a = tf.matmul(a, weights[i]) + biases[i]
-        a = tf.nn.relu(a, 'alloc_act_' + str(i))
+        # push through hidden layers
+        for i in range(1, num_layers - 2):
+            a = tf.matmul(a, weights[i]) + biases[i]
+            a = tf.nn.relu(a, 'alloc_act_' + str(i))
 
-    # final layer
-    pair = tf.matmul(a, weights[-1]) + biases[-1]
-    pool = tf.matmul(a, w_prime) + b_prime
+        # final layer
+        pair = tf.matmul(a, weights[-1]) + biases[-1]
+        pool = tf.matmul(a, w_prime) + b_prime
 
-    # Softmax over pairs and total pool
-    pair = tf.reshape(tf.nn.softmax(tf.reshape(pair, [-1, n_types * n_hos, n_types]), axis=-1), [-1, n_hos, n_types, n_types])
-    pool = tf.reshape(tf.nn.softmax(tf.reshape(pool, [-1, n_types * n_hos, n_types]), axis=1), [-1, n_hos, n_types, n_types])
+        # Softmax over pairs and total pool
+        pair = tf.reshape(tf.nn.softmax(tf.reshape(pair, [-1, n_types * n_hos, n_types]), axis=-1), [-1, n_hos, n_types, n_types])
+        pool = tf.reshape(tf.nn.softmax(tf.reshape(pool, [-1, n_types * n_hos, n_types]), axis=1), [-1, n_hos, n_types, n_types])
 
-    ## Weighting softmax values ##
+        ## Weighting softmax values ##
 
-    # Weight softmax values by hospital's reported needs
-    pair = tf.math.multiply(pair, tf.reshape(X, [-1, n_hos, n_types, 1]))
+        # Weight softmax values by hospital's reported needs
+        pair = tf.math.multiply(pair, tf.reshape(X, [-1, n_hos, n_types, 1]))
 
-    # Sums over each hospitals for for all pair types then reshapes to allow broadcasting
-    tot_reshaped = tf.reshape(tf.math.reduce_sum(tf.reshape(X, [-1, n_hos, n_types]), axis=1), [-1, 1, 1, n_types])
+        # Sums over each hospitals for for all pair types then reshapes to allow broadcasting
+        tot_reshaped = tf.reshape(tf.math.reduce_sum(tf.reshape(X, [-1, n_hos, n_types]), axis=1), [-1, 1, 1, n_types])
 
-    # Weight softmax values by total available pairs in pool
-    pool = tf.math.multiply(pool, tot_reshaped)
+        # Weight softmax values by total available pairs in pool
+        pool = tf.math.multiply(pool, tot_reshaped)
 
-    # Floor of minimum of two allocations
-    alloc = tf.math.floor(tf.math.minimum(pair, pool))
-    return alloc
+        # Floor of minimum of two allocations
+        alloc = tf.math.minimum(pair, pool)
+        return alloc
 def create_misreports(x, curr_mis, self_mask):
     '''
     x and curr_mis should have dimensions (B, h, p)
@@ -198,7 +204,6 @@ def compute_internal_util(internal):
 def compute_internal(misreports, og):
     ''' Computes the difference between '''
     return (og - misreports) #maybe just keep the specific misreport bidder's difference
-
 # This mask is to manipulate the reports and will only have 1 for the specific hospital misreporting
 self_mask = np.zeros([n_hos, batch_size, n_hos, n_types])
 self_mask[np.arange(n_hos), :, np.arange(n_hos), :] = 1.0
@@ -209,13 +214,13 @@ mis_u_mask[np.arange(n_hos), :, np.arange(n_hos)] = 1.0
 
 # Mask to only count valid matchings 
 u_mask = create_u_mask([(0,1)], n_types, n_hos)
-
 ## Sample Based Algorithm ##
 # TODO: test regret max stuff, check that misreports are not overreporting, lagrange
 
-alt_sample_size = 10000
+alt_sample_size = 1000
 X = tf.compat.v1.placeholder(tf.float64, [batch_size, n_hos * n_types], name='features')
-alt_sample = np.reshape(next(gen.generate_report(alt_sample_size)), (alt_sample_size, n_hos, n_types))
+alt_sample = tf.Variable(np.reshape(next(gen.generate_report(alt_sample_size)), (alt_sample_size, n_hos, n_types)), 
+                         dtype=tf.float64, trainable=False)
 
 misreports, og = best_sample_misreport(tf.reshape(X, [batch_size, n_hos, n_types]),
                                        alt_sample, self_mask, alt_sample_size)
@@ -225,18 +230,32 @@ non_reported = compute_internal(misreports, og)
 actual_alloc = feedforward(X)
 
 # Get misreport alloc
-mis_alloc = feedforward(tf.reshape(misreports, [-1, n_hos* n_types]))
+mis_alloc = feedforward(tf.reshape(misreports, [-1, n_hos * n_types]))
 
 # Calculate Utilities
 util = compute_util(actual_alloc, u_mask) # [batch_size, n_hos]
 mis_util = compute_sample_util(mis_alloc, u_mask, mis_u_mask, non_reported)
 best_mis = get_best_mis(mis_util, mis_u_mask) # [n_hos, batch_size, n_hos]
 
-mis_diff = tf.nn.relu(tf.tile(tf.expand_dims(util, 0), [n_hos, 1, 1]) - best_mis)
+mis_diff = tf.nn.relu(best_mis - tf.tile(tf.expand_dims(util, 0), [n_hos, 1, 1]))
 rgt = tf.reduce_mean(tf.reduce_max(mis_diff, axis=0), axis=0) # reduce max since only utility is from bidder i 
 
+penalty_weight = tf.Variable(.1, dtype=tf.float64, trainable=False)
+lagr_mults = tf.Variable(np.ones(n_hos).astype(np.float64) * 1.0)
+rgt_loss = penalty_weight * tf.reduce_sum(tf.square(rgt)) / 2.0 # quadratic penalty term
+lagr_loss = tf.reduce_sum(rgt * lagr_mults) # lagrange multiplier penalty term
+mean_tot_util = tf.reduce_mean(tf.reduce_sum(util, axis=1))
+total_loss = -mean_tot_util + rgt_loss + lagr_loss
 
-# optimizer = tf.train.AdamOptimizer(learn_rate)
+main_opt = tf.train.AdamOptimizer(learn_rate)
+lagr_opt = tf.train.GradientDescentOptimizer(penalty_weight)
+
+mech_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
+main_train_step = main_opt.minimize(total_loss, var_list=mech_vars)
+
+lagr_train_step = lagr_opt.minimize(-lagr_loss, var_list=lagr_mults)
+
+
 init_op = tf.compat.v1.global_variables_initializer()
 
 #test_in = np.random.randint(1, 100, size=(10, n_features))
@@ -244,8 +263,15 @@ sess = tf.compat.v1.InteractiveSession()
 
 writer = tf.compat.v1.summary.FileWriter('./graphs', sess.graph)
 sess.run(init_op)
+for i in range(100):
+    train_in = np.reshape(next(gen.generate_report(batch_size)), (batch_size, -1))
+    if i % 10 == 0:
+        print(sess.run(mean_tot_util, feed_dict={X:train_in}), sess.run(rgt_loss, feed_dict={X:train_in}), sess.run(lagr_loss, feed_dict={X:train_in}))
+    sess.run(main_train_step, feed_dict={X:train_in})
+    if i % 5 == 0:
+        sess.run(lagr_train_step, feed_dict={X:train_in})
 
-test_in = np.reshape(next(gen.generate_report(batch_size)), (10, -1))
-ex_util = sess.run(util, feed_dict={X:test_in})
-ex_best_util = sess.run(best_mis, feed_dict={X:test_in})
-ex_rgt = sess.run(rgt, feed_dict={X:test_in})
+test_set = next(gen.generate_report(batch_size), (batch_size, -1))
+
+sess.run(total_loss, feed_dict={X:test_set})
+writer.close()
