@@ -1,7 +1,9 @@
 import tensorflow as tf
 import numpy as np
 
+np.random.seed(0)
 tf.compat.v1.disable_eager_execution()
+
 
 class SingleHospital:
     def __init__(self, n_types, dist_lst):
@@ -16,19 +18,23 @@ class SingleHospital:
         for i, dist in enumerate(self.dists):
             X[:, i] = dist(size=batch_size)
         return X
-        
+
+
 class ReportGenerator:
     def __init__(self, hos_lst, single_report_shape):
         self.hospitals = hos_lst
         self.single_shape = single_report_shape
+
     def generate_report(self, batch_size):
         X = np.zeros((batch_size,) + self.single_shape)
         for i, hos in enumerate(self.hospitals):
             X[:, i, :] = hos.generate(batch_size)
         yield X
 
+
 def randint(low, high):
     return lambda size: np.random.randint(low, high, size)
+
 
 def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
     hos_lst = []
@@ -39,6 +45,8 @@ def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
         hos_lst.append(SingleHospital(n_types, tmp_dist_lst))
     gen = ReportGenerator(hos_lst, (n_hos, n_types))
     return gen
+
+
 def create_u_mask(compat_lst, n_types, n_hos):
     '''
     Create mask matrix that will only reward valid matchings making the rest 0
@@ -51,90 +59,99 @@ def create_u_mask(compat_lst, n_types, n_hos):
         mask[:, t2, t1] = 1.0
     return mask
 
-## Generator creation ##
-low_lst_lst = [[5, 10],[20, 40],[40, 80]]
-high_lst_lst = [[10, 20], [40, 80], [80, 160]]
-gen = create_simple_generator(low_lst_lst, high_lst_lst, 3, 2)
 
-learn_rate = 0.005
-n_hos = 3
-n_types = 2
-batch_size = 100
+class BasicNet:
+    def __init__(self):
+        self.low_lst_lst = [[5, 10],[20, 40],[40, 80]]
+        self.high_lst_lst = [[10, 20], [40, 80], [80, 160]]
+        self.gen = create_simple_generator(self.low_lst_lst, self.high_lst_lst, 3, 2)
 
-n_features = n_hos * n_types
-n_out = n_hos * n_types * n_types 
+        self.learn_rate = 0.0001
+        self.n_hos = 3
+        self.n_types = 2
+        self.batch_size = 10
 
-init = tf.keras.initializers.glorot_uniform()
+        self.n_features = self.n_hos * self.n_types
+        self.n_out = self.n_hos * self.n_types * self.n_types
 
-num_layers = 5
+        self.init = tf.keras.initializers.glorot_uniform()
 
-neurons = [n_features, 100, 100, 100, n_out]
+        self.num_layers = 5
 
-weights = []
-biases = []
+        self.neurons = [self.n_features, 100, 100, 100, self.n_out]
 
-activation = [tf.nn.tanh] * (num_layers - 1) + [tf.nn.tanh]
+        self.weights = []
+        self.biases = []
 
-with tf.compat.v1.variable_scope("alloc_mech"):
-    # Creating input layer weights
-    print("Creating weights for layer: 1")
-    print([neurons[0], neurons[1]])
-    weights.append(tf.compat.v1.get_variable('w_a_1', [neurons[0], neurons[1]], initializer=init, dtype=tf.float64))
+        self.activation = [tf.nn.tanh] * (self.num_layers - 1) + [tf.nn.tanh]
 
-
-    # Creating hidden layers
-    for i in range(1, num_layers - 2):
-        print("Creating weights for layer: {}".format(i+1))
-        print([neurons[i], neurons[i + 1]])
-        weights.append(tf.compat.v1.get_variable('w_a_' + str(i+1), [neurons[i], neurons[i + 1]],
-                                                 initializer=init, dtype=tf.float64))
-
-    # need two outputs
-    print("Creating weights for layer: {}".format(num_layers - 1))
-    print([neurons[-2], neurons[-1]])
-    weights.append(tf.compat.v1.get_variable('w_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]],
-                                             initializer=init, dtype=tf.float64))
-    w_prime = tf.compat.v1.get_variable('wi_a_' + str(num_layers - 1), [neurons[-2], neurons[-1]],
-                                        initializer=init, dtype=tf.float64)
+    def init_graph(self):
+        with tf.compat.v1.variable_scope("alloc_mech"):
+            # Creating input layer weights
+            print("Creating weights for layer: 1")
+            print([self.neurons[0], self.neurons[1]])
+            self.weights.append(tf.compat.v1.get_variable('w_a_1', [self.neurons[0], self.neurons[1]],
+                                                          initializer=self.init, dtype=tf.float64))
 
 
-    # Biases
-    for i in range(num_layers - 2):
-        print("Creating biases for layer: {}".format(i+1))
-        biases.append(tf.compat.v1.get_variable('b_a_' + str(i+1), [neurons[i + 1]],
-                                                initializer=init, dtype=tf.float64))
+            # Creating hidden layers
+            for i in range(1, self.num_layers - 2):
+                print("Creating weights for layer: {}".format(i+1))
+                print([self.neurons[i], self.neurons[i + 1]])
+                self.weights.append(tf.compat.v1.get_variable('w_a_' + str(i+1),
+                                                              [self.neurons[i], self.neurons[i + 1]],
+                                                              initializer=self.init, dtype=tf.float64))
 
-    print("Creating biases for layer: {}".format(num_layers - 1))
-    biases.append(tf.compat.v1.get_variable('b_a_' + str(num_layers - 1), [neurons[-1]],
-                                            initializer=init, dtype=tf.float64))
-    b_prime = tf.compat.v1.get_variable('bi_a_' + str(num_layers - 1), [neurons[-1]],
-                                        initializer=init, dtype=tf.float64)
+            # need two outputs
+            print("Creating weights for layer: {}".format(self.num_layers - 1))
+            print([self.neurons[-2], self.neurons[-1]])
+            self.weights.append(tf.compat.v1.get_variable('w_a_' + str(self.num_layers - 1),
+                                                          [self.neurons[-2], self.neurons[-1]],
+                                                          initializer=self.init, dtype=tf.float64))
+            self.w_prime = tf.compat.v1.get_variable('wi_a_' + str(self.num_layers - 1),
+                                                     [self.neurons[-2], self.neurons[-1]],
+                                                     initializer=self.init, dtype=tf.float64)
 
-def feedforward(X):
-        x_in = tf.reshape(X, [-1, neurons[0]])
 
-        a = tf.nn.relu(tf.matmul(x_in, weights[0]) + biases[0], 'alloc_act_0')
+            # Biases
+            for i in range(self.num_layers - 2):
+                print("Creating biases for layer: {}".format(i+1))
+                self.biases.append(tf.compat.v1.get_variable('b_a_' + str(i+1), [self.neurons[i + 1]],
+                                                             initializer=self.init, dtype=tf.float64))
+
+            print("Creating biases for layer: {}".format(self.num_layers - 1))
+            self.biases.append(tf.compat.v1.get_variable('b_a_' + str(self.num_layers - 1), [self.neurons[-1]],
+                                                         initializer=self.init, dtype=tf.float64))
+            self.b_prime = tf.compat.v1.get_variable('bi_a_' + str(self.num_layers - 1), [self.neurons[-1]],
+                                                     initializer=self.init, dtype=tf.float64)
+
+    def feedforward(self, X):
+        x_in = tf.reshape(X, [-1, self.neurons[0]])
+
+        a = tf.nn.relu(tf.matmul(x_in, self.weights[0]) + self.biases[0], 'alloc_act_0')
 
         # push through hidden layers
-        for i in range(1, num_layers - 2):
-            a = tf.matmul(a, weights[i]) + biases[i]
+        for i in range(1, self.num_layers - 2):
+            a = tf.matmul(a, self.weights[i]) + self.biases[i]
             a = tf.nn.relu(a, 'alloc_act_' + str(i))
 
         # final layer
-        pair = tf.matmul(a, weights[-1]) + biases[-1]
-        pool = tf.matmul(a, w_prime) + b_prime
+        pair = tf.matmul(a, self.weights[-1]) + self.biases[-1]
+        pool = tf.matmul(a, self.w_prime) + self.b_prime
 
         # Softmax over pairs and total pool
-        pair = tf.reshape(tf.nn.softmax(tf.reshape(pair, [-1, n_types * n_hos, n_types]), axis=-1), [-1, n_hos, n_types, n_types])
-        pool = tf.reshape(tf.nn.softmax(tf.reshape(pool, [-1, n_types * n_hos, n_types]), axis=1), [-1, n_hos, n_types, n_types])
+        pair = tf.reshape(tf.nn.softmax(tf.reshape(pair, [-1, self.n_types * self.n_hos, self.n_types]), axis=-1),
+                          [-1, self.n_hos, self.n_types, self.n_types])
+        pool = tf.reshape(tf.nn.softmax(tf.reshape(pool, [-1, self.n_types * self.n_hos, self.n_types]), axis=1),
+                          [-1, self.n_hos, self.n_types, self.n_types])
 
         ## Weighting softmax values ##
 
         # Weight softmax values by hospital's reported needs
-        pair = tf.math.multiply(pair, tf.reshape(X, [-1, n_hos, n_types, 1]))
+        pair = tf.math.multiply(pair, tf.reshape(X, [-1, self.n_hos, self.n_types, 1]))
 
         # Sums over each hospitals for for all pair types then reshapes to allow broadcasting
-        tot_reshaped = tf.reshape(tf.math.reduce_sum(tf.reshape(X, [-1, n_hos, n_types]), axis=1), [-1, 1, 1, n_types])
+        tot_reshaped = tf.reshape(tf.math.reduce_sum(tf.reshape(X, [-1, self.n_hos, self.n_types]), axis=1), [-1, 1, 1, self.n_types])
 
         # Weight softmax values by total available pairs in pool
         pool = tf.math.multiply(pool, tot_reshaped)
@@ -142,138 +159,152 @@ def feedforward(X):
         # Floor of minimum of two allocations
         alloc = tf.math.minimum(pair, pool)
         return alloc
-def create_misreports(x, curr_mis, self_mask):
-    '''
-    x and curr_mis should have dimensions (B, h, p)
-    combined and og has dimensions (n_hos, batch_size, n_hos, n_types)
-    '''
-    tiled_curr_mis = tf.tile(tf.expand_dims(curr_mis, 0), [n_hos, 1, 1, 1])
-    og_tiled = tf.reshape(tf.tile(x, [n_hos, 1, 1]), [n_hos, -1, n_hos, n_types])
-    
-    # Filter original reports to only keep reports from all other hospitals
-    other_hos = og_tiled * (1 - self_mask)
-    
-    # Filter reports to only keep the mis reports
-    only_mis = tiled_curr_mis * self_mask
-    
-    # Add the two to get inputs where only one hospital misreports
-    combined = only_mis + other_hos
-    return combined, og_tiled
 
-def best_sample_misreport(x, alt_sample, self_mask, alt_sample_size):
-    # Expand x and tile for each sample and hos
-    expanded_x = tf.expand_dims(tf.expand_dims(x, 0), 0)
-    tiled_x = tf.tile(expanded_x, [alt_sample_size, n_hos , 1, 1, 1])
-    
-    # Expand and tile sample for each sample and hos
-    expanded_sample = tf.expand_dims(tf.expand_dims(alt_sample, 1), 1)
-    tiled_sample = tf.tile(expanded_sample, [1, n_hos, batch_size, 1, 1])
-    
-    
-    # Only keep the specific hospitals misreport
-    only_mis = tf.math.maximum(tiled_sample * self_mask, tiled_x * self_mask)
-    # Keep other hospitals reports the same
-    only_other = tiled_x * (1 - self_mask)
-    
-    combined = only_mis + only_other
-    return combined, tiled_x
+    def create_misreports(self, x, curr_mis, self_mask):
+        '''
+        x and curr_mis should have dimensions (B, h, p)
+        combined and og has dimensions (n_hos, batch_size, n_hos, n_types)
+        '''
+        tiled_curr_mis = tf.tile(tf.expand_dims(curr_mis, 0), [self.n_hos, 1, 1, 1])
+        og_tiled = tf.reshape(tf.tile(x, [self.n_hos, 1, 1]), [self.n_hos, -1, self.n_hos, self.n_types])
+        
+        # Filter original reports to only keep reports from all other hospitals
+        other_hos = og_tiled * (1 - self_mask)
+        
+        # Filter reports to only keep the mis reports
+        only_mis = tiled_curr_mis * self_mask
+        
+        # Add the two to get inputs where only one hospital misreports
+        combined = only_mis + other_hos
+        return combined, og_tiled
 
-def compute_sample_util(alloc, alloc_mask, mis_mask, sample_internal):
-    # Calculate utility from mechanism
-    mech_util = tf.reduce_sum(tf.multiply(alloc, alloc_mask), axis=(2, 3))
-    mech_util = tf.reshape(mech_util, [-1, n_hos, batch_size, n_hos])
-    
-    # Calculate utility from internal matchings
-    internal_util = compute_internal_util(sample_internal)
-    
-    return (mech_util + internal_util) # [alt_size, n_hos, batch_size, n_hos]
+    def best_sample_misreport(self, x, alt_sample, self_mask, alt_sample_size):
+        # Expand x and tile for each sample and hos
+        expanded_x = tf.expand_dims(tf.expand_dims(x, 0), 0)
+        tiled_x = tf.tile(expanded_x, [alt_sample_size, self.n_hos , 1, 1, 1])
+        
+        # Expand and tile sample for each sample and hos
+        expanded_sample = tf.expand_dims(tf.expand_dims(alt_sample, 1), 1)
+        tiled_sample = tf.tile(expanded_sample, [1, self.n_hos, self.batch_size, 1, 1])
+        
+        
+        # Only keep the specific hospitals misreport
+        only_mis = tf.math.maximum(tiled_sample * self_mask, tiled_x * self_mask)
+        # Keep other hospitals reports the same
+        only_other = tiled_x * (1 - self_mask)
+        
+        combined = only_mis + only_other
+        return combined, tiled_x
 
-def get_best_mis(tot_sample_util, mis_mask):
-    hos_util = tot_sample_util * mis_mask
-    return tf.reduce_max(hos_util, axis=0) # will only keep the best misreport
-    
-def compute_util(alloc, mask, internal=None):
-    if internal is None:
-        return tf.reduce_sum(tf.multiply(alloc, mask), axis=(2, 3))
-    else:
-        mech_util = tf.reshape(tf.reduce_sum(tf.multiply(alloc, mask), axis=(2, 3)), [n_hos, -1, n_hos])
-        return mech_util + compute_internal_util(internal)
-def compute_internal_util(internal):
-    '''
-    internal has dim [n_hos, batch_size, n_hos, n_types]
-    '''
-    return tf.reduce_min(internal, axis=-1) # for two types, utility is just the minimum of two types
-def compute_internal(misreports, og):
-    ''' Computes the difference between '''
-    return (og - misreports) #maybe just keep the specific misreport bidder's difference
-# This mask is to manipulate the reports and will only have 1 for the specific hospital misreporting
-self_mask = np.zeros([n_hos, batch_size, n_hos, n_types])
-self_mask[np.arange(n_hos), :, np.arange(n_hos), :] = 1.0
+    def compute_sample_util(self, alloc, alloc_mask, mis_mask, sample_internal):
+        # Calculate utility from mechanism
+        mech_util = tf.reduce_sum(tf.multiply(alloc, alloc_mask), axis=(2, 3))
+        mech_util = tf.reshape(mech_util, [-1, self.n_hos, self.batch_size, self.n_hos])
+        
+        # Calculate utility from internal matchings
+        internal_util = self.compute_internal_util(sample_internal)
+        
+        return mech_util + internal_util # [alt_size, n_hos, batch_size, n_hos]
 
-# This mask will only count the utility from the specific hospital that is misreporting
-mis_u_mask = np.zeros((n_hos, batch_size, n_hos))
-mis_u_mask[np.arange(n_hos), :, np.arange(n_hos)] = 1.0
+    def get_best_mis(self, tot_sample_util, mis_mask):
+        hos_util = tot_sample_util * mis_mask
+        return tf.reduce_max(hos_util, axis=0) # will only keep the best misreport
+        
+    def compute_util(self, alloc, mask, internal=None):
+        if internal is None:
+            return tf.reduce_sum(tf.multiply(alloc, mask), axis=(2, 3))
+        else:
+            mech_util = tf.reshape(tf.reduce_sum(tf.multiply(alloc, mask), axis=(2, 3)), [self.n_hos, -1, self.n_hos])
+            return mech_util + self.compute_internal_util(internal)
 
-# Mask to only count valid matchings 
-u_mask = create_u_mask([(0,1)], n_types, n_hos)
-## Sample Based Algorithm ##
-# TODO: test regret max stuff, check that misreports are not overreporting, lagrange
+    def compute_internal_util(self, internal):
+        '''
+        internal has dim [n_hos, batch_size, n_hos, n_types]
+        '''
+        return tf.reduce_min(internal, axis=-1) # for two types, utility is just the minimum of two types
 
-alt_sample_size = 1000
-X = tf.compat.v1.placeholder(tf.float64, [batch_size, n_hos * n_types], name='features')
-alt_sample = tf.compat.v1.Variable(np.reshape(next(gen.generate_report(alt_sample_size)), (alt_sample_size, n_hos, n_types)), 
-                         dtype=tf.float64, trainable=False)
-
-misreports, og = best_sample_misreport(tf.reshape(X, [batch_size, n_hos, n_types]),
-                                       alt_sample, self_mask, alt_sample_size)
-non_reported = compute_internal(misreports, og)
-
-# Get feedforward output
-actual_alloc = feedforward(X)
-
-# Get misreport alloc
-mis_alloc = feedforward(tf.reshape(misreports, [-1, n_hos * n_types]))
-
-# Calculate Utilities
-util = compute_util(actual_alloc, u_mask) # [batch_size, n_hos]
-mis_util = compute_sample_util(mis_alloc, u_mask, mis_u_mask, non_reported)
-best_mis = get_best_mis(mis_util, mis_u_mask) # [n_hos, batch_size, n_hos]
-
-mis_diff = tf.nn.relu(best_mis - tf.tile(tf.expand_dims(util, 0), [n_hos, 1, 1]))
-rgt = tf.reduce_mean(tf.reduce_max(mis_diff, axis=0), axis=0) # reduce max since only utility is from bidder i 
-
-penalty_weight = tf.compat.v1.Variable(.1, dtype=tf.float64, trainable=False)
-lagr_mults = tf.compat.v1.Variable(np.ones(n_hos).astype(np.float64) * 1.0)
-rgt_loss = penalty_weight * tf.reduce_sum(tf.square(rgt)) / 2.0 # quadratic penalty term
-lagr_loss = tf.reduce_sum(rgt * lagr_mults) # lagrange multiplier penalty term
-mean_tot_util = tf.reduce_mean(tf.reduce_sum(util, axis=1))
-total_loss = -mean_tot_util + rgt_loss + lagr_loss
-
-main_opt = tf.compat.v1.train.AdamOptimizer(learn_rate)
-lagr_opt = tf.compat.v1.train.GradientDescentOptimizer(penalty_weight)
-
-mech_vars = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
-main_train_step = main_opt.minimize(total_loss, var_list=mech_vars)
-
-lagr_train_step = lagr_opt.minimize(-lagr_loss, var_list=lagr_mults)
+    def compute_internal(self, misreports, og):
+        ''' Computes the difference between '''
+        return og - misreports #maybe just keep the specific misreport bidder's difference
 
 
-init_op = tf.compat.v1.global_variables_initializer()
+def sample_based_train(net):
+    # This mask is to manipulate the reports and will only have 1 for the specific hospital misreporting
+    self_mask = np.zeros([net.n_hos, net.batch_size, net.n_hos, net.n_types])
+    self_mask[np.arange(net.n_hos), :, np.arange(net.n_hos), :] = 1.0
 
-#test_in = np.random.randint(1, 100, size=(10, n_features))
-sess = tf.compat.v1.InteractiveSession()
+    # This mask will only count the utility from the specific hospital that is misreporting
+    mis_u_mask = np.zeros((net.n_hos, net.batch_size, net.n_hos))
+    mis_u_mask[np.arange(net.n_hos), :, np.arange(net.n_hos)] = 1.0
 
-writer = tf.compat.v1.summary.FileWriter('./graphs', sess.graph)
-sess.run(init_op)
-for i in range(100):
-    train_in = np.reshape(next(gen.generate_report(batch_size)), (batch_size, -1))
-    if i % 10 == 0:
-        print(sess.run(mean_tot_util, feed_dict={X:train_in}), sess.run(rgt_loss, feed_dict={X:train_in}), sess.run(lagr_loss, feed_dict={X:train_in}))
-    sess.run(main_train_step, feed_dict={X:train_in})
-    if i % 5 == 0:
-        sess.run(lagr_train_step, feed_dict={X:train_in})
+    # Mask to only count valid matchings 
+    u_mask = create_u_mask([(0,1)], net.n_types, net.n_hos)
+    ## Sample Based Algorithm ##
+    # TODO: test regret max stuff, check that misreports are not overreporting, lagrange
 
-test_set = next(gen.generate_report(batch_size), (batch_size, -1))
+    alt_sample_size = 2000
+    X = tf.compat.v1.placeholder(tf.float64, [net.batch_size, net.n_hos * net.n_types], name='features')
+    alt_sample = tf.compat.v1.Variable(np.reshape(next(net.gen.generate_report(alt_sample_size)), (alt_sample_size, net.n_hos, net.n_types)),
+                             dtype=tf.float64, trainable=False)
 
-sess.run(total_loss, feed_dict={X:test_set})
-writer.close()
+    misreports, og = net.best_sample_misreport(tf.reshape(X, [net.batch_size, net.n_hos, net.n_types]),
+                                           alt_sample, self_mask, alt_sample_size)
+    non_reported = net.compute_internal(misreports, og)
+
+    # Get feedforward output
+    actual_alloc = net.feedforward(X)
+
+    # Get misreport alloc
+    mis_alloc = net.feedforward(tf.reshape(misreports, [-1, net.n_hos * net.n_types]))
+
+    # Calculate Utilities
+    util = net.compute_util(actual_alloc, u_mask) # [batch_size, n_hos]
+    mis_util = net.compute_sample_util(mis_alloc, u_mask, mis_u_mask, non_reported)
+    best_mis = net.get_best_mis(mis_util, mis_u_mask) # [n_hos, batch_size, n_hos]
+
+    mis_diff = tf.nn.relu(best_mis - tf.tile(tf.expand_dims(util, 0), [net.n_hos, 1, 1]))
+    rgt = tf.reduce_mean(tf.reduce_max(mis_diff, axis=0), axis=0) # reduce max since only utility is from bidder i 
+
+    penalty_weight = tf.compat.v1.Variable(.1, dtype=tf.float64, trainable=False)
+    lagr_mults = tf.compat.v1.Variable(np.ones(net.n_hos).astype(np.float64) * 1.0)
+    rgt_loss = penalty_weight * tf.reduce_sum(tf.square(rgt)) / 2.0 # quadratic penalty term
+    lagr_loss = tf.reduce_sum(rgt * lagr_mults) # lagrange multiplier penalty term
+    mean_tot_util = tf.reduce_mean(tf.reduce_sum(util, axis=1))
+    total_loss = -mean_tot_util + rgt_loss + lagr_loss
+
+    main_opt = tf.compat.v1.train.AdamOptimizer(net.learn_rate)
+    lagr_opt = tf.compat.v1.train.GradientDescentOptimizer(penalty_weight)
+
+    mech_vars = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
+    main_train_step = main_opt.minimize(total_loss, var_list=mech_vars)
+
+    lagr_train_step = lagr_opt.minimize(-lagr_loss, var_list=lagr_mults)
+
+
+    init_op = tf.compat.v1.global_variables_initializer()
+
+    sess = tf.compat.v1.InteractiveSession()
+
+    writer = tf.compat.v1.summary.FileWriter('./graphs', sess.graph)
+    sess.run(init_op)
+    test_set = np.reshape(next(net.gen.generate_report(net.batch_size)), (net.batch_size, -1))
+    print("TEST SET")
+    print(sess.run(total_loss, feed_dict={X:test_set}))
+    print("Training")
+    for i in range(300):
+        train_in = np.reshape(next(net.gen.generate_report(net.batch_size)), (net.batch_size, -1))
+        if i % 10 == 0:
+            print(sess.run(total_loss, feed_dict={X:train_in}))
+            #print(sess.run(mean_tot_util, feed_dict={X:train_in}), sess.run(rgt_loss, feed_dict={X:train_in}), sess.run(lagr_loss, feed_dict={X:train_in}))
+        sess.run(main_train_step, feed_dict={X:train_in})
+        if i % 5 == 0:
+            sess.run(lagr_train_step, feed_dict={X:train_in})
+
+    print("TEST SET")
+    print(sess.run(total_loss, feed_dict={X:test_set}))
+    writer.close()
+
+
+simple_net = BasicNet()
+simple_net.init_graph()
+sample_based_train(simple_net)
