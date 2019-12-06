@@ -66,10 +66,13 @@ class BasicNet:
         self.high_lst_lst = [[10, 20], [40, 80], [80, 160]]
         self.gen = create_simple_generator(self.low_lst_lst, self.high_lst_lst, 3, 2)
 
-        self.learn_rate = 0.0001
+        self.learn_rate = 0.001
+        self.mis_lr = 0.5
+        self.mis_opt_iters = 500
+
         self.n_hos = 3
         self.n_types = 2
-        self.batch_size = 10
+        self.batch_size = 128
 
         self.n_features = self.n_hos * self.n_types
         self.n_out = self.n_hos * self.n_types * self.n_types
@@ -196,7 +199,7 @@ class BasicNet:
         combined = only_mis + only_other
         return combined, tiled_x
 
-    def compute_sample_util(self, alloc, alloc_mask, mis_mask, sample_internal):
+    def compute_sample_util(self, alloc, alloc_mask, sample_internal):
         # Calculate utility from mechanism
         mech_util = tf.reduce_sum(tf.multiply(alloc, alloc_mask), axis=(2, 3))
         mech_util = tf.reshape(mech_util, [-1, self.n_hos, self.batch_size, self.n_hos])
@@ -204,7 +207,7 @@ class BasicNet:
         # Calculate utility from internal matchings
         internal_util = self.compute_internal_util(sample_internal)
         
-        return mech_util + internal_util # [alt_size, n_hos, batch_size, n_hos]
+        return mech_util + internal_util # [-1, n_hos, batch_size, n_hos]
 
     def get_best_mis(self, tot_sample_util, mis_mask):
         hos_util = tot_sample_util * mis_mask
@@ -225,27 +228,103 @@ class BasicNet:
 
     def compute_internal(self, misreports, og):
         ''' Computes the difference between '''
-        return og - misreports #maybe just keep the specific misreport bidder's difference
+        return og - misreports # maybe just keep the specific misreport bidder's difference
 
+    def create_masks(self):
+        # This mask is to manipulate the reports and will only have 1 for the specific hospital misreporting
+        self_mask = np.zeros([self.n_hos, self.batch_size, self.n_hos, self.n_types])
+        self_mask[np.arange(self.n_hos), :, np.arange(self.n_hos), :] = 1.0
+
+        # This mask will only count the utility from the specific hospital that is misreporting
+        mis_u_mask = np.zeros((self.n_hos, self.batch_size, self.n_hos))
+        mis_u_mask[np.arange(self.n_hos), :, np.arange(self.n_hos)] = 1.0
+
+        # Mask to only count valid matchings
+        u_mask = create_u_mask([(0, 1)], self.n_types, self.n_hos)
+        return self_mask, mis_u_mask, u_mask
+
+def opt_based_train(net):
+    # create all the masks
+    self_mask, mis_u_mask, u_mask = net.create_masks()
+
+    X = tf.compat.v1.placeholder(tf.float64, [net.batch_size, net.n_hos * net.n_types], name='features')
+    x = tf.reshape(X, [net.batch_size, net.n_hos, net.n_types])
+
+    curr_mis = tf.compat.v1.Variable(np.zeros((net.batch_size, net.n_hos, net.n_types)).astype(np.float64))
+
+    # Create misreports that will be optimized
+    misreports, og = net.create_misreports(x, curr_mis, self_mask)
+
+    non_reported = net.compute_internal(misreports, og)
+
+    actual_alloc = net.feedforward(X)
+    mis_alloc = net.feedforward(tf.reshape(misreports, [-1, net.n_hos * net.n_types]))
+
+    util = net.compute_util(actual_alloc, u_mask)
+    mis_util = tf.reshape(net.compute_sample_util(mis_alloc, u_mask, non_reported) * mis_u_mask,
+                          [net.n_hos, -1, net.n_hos])
+    true_util = tf.tile(tf.expand_dims(util, 0), [net.n_hos, 1, 1])
+    mis_diff = tf.nn.relu((mis_util - true_util) * mis_u_mask)
+    rgt = tf.reduce_mean(tf.reduce_max(mis_diff, axis=0), axis=0)
+
+    penalty_weight = tf.compat.v1.Variable(.1, dtype=tf.float64, trainable=False)
+    lagr_mults = tf.compat.v1.Variable(np.ones(net.n_hos).astype(np.float64) * 1.0)
+    rgt_loss = penalty_weight * tf.reduce_sum(tf.square(rgt)) / 2.0  # quadratic penalty term
+    lagr_loss = tf.reduce_sum(rgt * lagr_mults)  # lagrange multiplier penalty term
+    mean_tot_util = tf.reduce_mean(tf.reduce_sum(util, axis=1))
+    total_loss = -mean_tot_util + rgt_loss + lagr_loss
+    mis_loss = -tf.reduce_sum(mis_util)
+
+
+    main_opt = tf.compat.v1.train.AdamOptimizer(net.learn_rate)
+    lagr_opt = tf.compat.v1.train.GradientDescentOptimizer(penalty_weight)
+    mis_opt = tf.compat.v1.train.AdamOptimizer(net.mis_lr)
+
+    mech_vars = tf.compat.v1.get_collection(tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES, scope="alloc_mech")
+    main_train_step = main_opt.minimize(total_loss, var_list=mech_vars)
+
+    mis_train_step = mis_opt.minimize(mis_loss, var_list=curr_mis)
+
+    lagr_train_step = lagr_opt.minimize(-lagr_loss, var_list=lagr_mults)
+
+    init_op = tf.compat.v1.global_variables_initializer()
+
+    sess = tf.compat.v1.InteractiveSession()
+
+    writer = tf.compat.v1.summary.FileWriter('./graphs', sess.graph)
+    sess.run(init_op)
+    test_set = np.reshape(next(net.gen.generate_report(net.batch_size)), (net.batch_size, -1))
+    print("TEST SET")
+    print(sess.run(total_loss, feed_dict={X: test_set}))
+    print("Training")
+    for i in range(300):
+        train_in = np.reshape(next(net.gen.generate_report(net.batch_size)), (net.batch_size, -1))
+
+        # optimize misreports
+        for j in range(net.mis_opt_iters):
+            sess.run(mis_train_step, feed_dict={X: train_in})
+
+        if i % 10 == 0:
+            print(sess.run(total_loss, feed_dict={X: train_in}))
+            # print(sess.run(mean_tot_util, feed_dict={X:train_in}), sess.run(rgt_loss, feed_dict={X:train_in}), sess.run(lagr_loss, feed_dict={X:train_in}))
+        sess.run(main_train_step, feed_dict={X: train_in})
+        if i % 5 == 0:
+            sess.run(lagr_train_step, feed_dict={X: train_in})
+
+    print("TEST SET")
+    print(sess.run(total_loss, feed_dict={X: test_set}))
+    writer.close()
 
 def sample_based_train(net):
-    # This mask is to manipulate the reports and will only have 1 for the specific hospital misreporting
-    self_mask = np.zeros([net.n_hos, net.batch_size, net.n_hos, net.n_types])
-    self_mask[np.arange(net.n_hos), :, np.arange(net.n_hos), :] = 1.0
+    self_mask, mis_u_mask, u_mask = net.create_masks()
 
-    # This mask will only count the utility from the specific hospital that is misreporting
-    mis_u_mask = np.zeros((net.n_hos, net.batch_size, net.n_hos))
-    mis_u_mask[np.arange(net.n_hos), :, np.arange(net.n_hos)] = 1.0
-
-    # Mask to only count valid matchings 
-    u_mask = create_u_mask([(0,1)], net.n_types, net.n_hos)
-    ## Sample Based Algorithm ##
+    # Sample Based Algorithm #
     # TODO: test regret max stuff, check that misreports are not overreporting, lagrange
 
     alt_sample_size = 2000
     X = tf.compat.v1.placeholder(tf.float64, [net.batch_size, net.n_hos * net.n_types], name='features')
-    alt_sample = tf.compat.v1.Variable(np.reshape(next(net.gen.generate_report(alt_sample_size)), (alt_sample_size, net.n_hos, net.n_types)),
-                             dtype=tf.float64, trainable=False)
+    alt_sample = tf.compat.v1.Variable(np.reshape(next(net.gen.generate_report(alt_sample_size)),
+                                                  (alt_sample_size, net.n_hos, net.n_types)), dtype=tf.float64, trainable=False)
 
     misreports, og = net.best_sample_misreport(tf.reshape(X, [net.batch_size, net.n_hos, net.n_types]),
                                            alt_sample, self_mask, alt_sample_size)
@@ -259,7 +338,7 @@ def sample_based_train(net):
 
     # Calculate Utilities
     util = net.compute_util(actual_alloc, u_mask) # [batch_size, n_hos]
-    mis_util = net.compute_sample_util(mis_alloc, u_mask, mis_u_mask, non_reported)
+    mis_util = net.compute_sample_util(mis_alloc, u_mask, non_reported)
     best_mis = net.get_best_mis(mis_util, mis_u_mask) # [n_hos, batch_size, n_hos]
 
     mis_diff = tf.nn.relu(best_mis - tf.tile(tf.expand_dims(util, 0), [net.n_hos, 1, 1]))
@@ -307,4 +386,5 @@ def sample_based_train(net):
 
 simple_net = BasicNet()
 simple_net.init_graph()
-sample_based_train(simple_net)
+#sample_based_train(simple_net)
+opt_based_train(simple_net)
