@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 
 class MatchNet(nn.Module):
@@ -62,19 +63,31 @@ def calc_util(alloc):
     raise NotImplementedError
 
 
+def optimize_misreports(model, curr_mis, p, min_bids, max_bids, iterations=10, lr=1e-3):
+    # not convinced this method is totally correct but sketches out what we want to do
+    mis_input = create_combined_misreport(curr_mis, p)
+    for i in range(iterations):
+        mis_input.requires_grad_(True)
+        output = model.forward(mis_input.view(-1, n_hos * n_types))
+        model.zero_grad()
+        mis_util = calc_mis_util(output)
+        mis_tot_util = torch.sum(mis_util, dim)
+        mis_tot_util.backward()
+
+
+        with torch.no_grad(): # do we need no_grad() here?
+            mis_input.data += lr*mis_input.grad
+            mis_input.clamp_(min_bids, max_bids)
+        mis_input.detach()
+
 for c  in range(main_iter):
     p # true input by batch dim [batch size, n_hos, n_types]
     curr_mis = p.clone().detach().requires_grad_(True)
 
-    mis_optimizer # TODO: Define misreport Optimizer 
-    for i in range(inner_iter):
-        mis_input = create_combined_misreport(curr_mis, p) 
-        output = model.forward(mis_input.view(-1, n_hos * n_types))
-        mis_util = calc_mis_util(output)
-        mis_tot_util = torch.sum(mis_util, dim)
-        mis_tot_util.backward()
-        mis_optimizer.step()
 
+    min_bids = None # these are values to clamp bids, i.e. must be above 0 and below true pool
+    max_bids = None
+    optimize_misreports(model, curr_mis, p, min_bids, max_bids)
     util = calc_util(model.forward(p))
 
     mis_diff = nn.functional.ReLU(util - mis_util) # [batch_size, n_hos]
