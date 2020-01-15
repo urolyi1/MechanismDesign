@@ -32,8 +32,9 @@ def create_combined_misreport(curr_mis, true_rep, self_mask):
     combined: dim [n_hos, batch_size, n_hos, n_type]
 
     '''
-    only_mis = curr_mis.view(1, -1, n_hos, n_type) # TODO: figure out how to tile in pytorch
-    raise NotImplementedError
+    only_mis = curr_mis.view(1, -1, n_hos, n_type).repeat(n_hos, 1, 1, 1) * self_mask 
+    other_hos = true_rep.view(1, -1, n_hos, n_type).repeat(n_hos, 1, 1, 1) * (1 - self_mask)
+    return only_mis + other_hos
 
 def calc_mis_util(mis_alloc, S, n_hos, n_types, mis_mask):
     '''
