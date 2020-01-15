@@ -16,7 +16,7 @@ class MatchNet(nn.Module):
     def forward(self):
         raise NotImplementedError
 
-def create_combined_misreport(curr_mis, true_rep):
+def create_combined_misreport(curr_mis, true_rep, self_mask):
     ''' 
     Tiles and combines curr misreport and true rep to create output tensor
     where only one hospital is misreporting at a time
@@ -25,22 +25,24 @@ def create_combined_misreport(curr_mis, true_rep):
     ------
     curr_mis: current misreports dim [batch_size, n_hos, n_type]
     true_rep: true report dim [batch_size, n_hos, n_type]
-
+    self_mask: tensor of all zeros except in index [i, :, i, :]
 
     OUTPUT
     ------
     combined: dim [n_hos, batch_size, n_hos, n_type]
 
     '''
+    only_mis = curr_mis.view(1, -1, n_hos, n_type) # TODO: figure out how to tile in pytorch
     raise NotImplementedError
 
-def calc_mis_util(mis_alloc):
+def calc_mis_util(mis_alloc, S, n_hos, n_types, mis_mask):
     '''
-    Takse misreport allocation and computes utility
+    Takes misreport allocation and computes utility
     
     INPUT
     ------
     mis_alloc: dim [n_hos * batch_size, n_possible_cycles]
+    S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
 
     OUTPUT
     ------
@@ -48,19 +50,22 @@ def calc_mis_util(mis_alloc):
     '''
     raise NotImplementedError
 
-def calc_util(alloc):
+def calc_util(alloc_vec, S, n_hos, n_types):
     '''
-    Takse truthful allocation and computes utility
+    Takes truthful allocation and computes utility
     
     INPUT
     ------
-    mis_alloc: dim [batch_size, n_possible_cycles]
+    alloc_vec: dim [batch_size, n_possible_cycles]
+    S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
 
     OUTPUT
     ------
     util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
     '''
-    raise NotImplementedError
+
+    allocation = alloc_vec @ torch.transpose(S, 0, 1) # [batch_size, n_hos * n_types]
+    return torch.sum(allocation.view(-1, n_hos, n_types), dim=-1)
 
 
 def optimize_misreports(model, curr_mis, p, min_bids, max_bids, iterations=10, lr=1e-3):
@@ -76,7 +81,7 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, iterations=10, l
 
 
         with torch.no_grad(): # do we need no_grad() here?
-            mis_input.data += lr*mis_input.grad
+            mis_input.data += lr * mis_input.grad
             mis_input.clamp_(min_bids, max_bids)
         mis_input.detach()
 
@@ -88,6 +93,7 @@ for c  in range(main_iter):
     min_bids = None # these are values to clamp bids, i.e. must be above 0 and below true pool
     max_bids = None
     optimize_misreports(model, curr_mis, p, min_bids, max_bids)
+
     util = calc_util(model.forward(p))
 
     mis_diff = nn.functional.ReLU(util - mis_util) # [batch_size, n_hos]
