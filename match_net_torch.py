@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import cvxpy as cp
+from cvxpylayers.torch import CvxpyLayer
 
 class MatchNet(nn.Module):
 
@@ -17,7 +19,7 @@ class MatchNet(nn.Module):
 
         # creating the cvxypy layer
         num_centers = self.n_hos
-        num_structures = # TODO: figure out how many cycles
+        num_structures = S.shape[1]
         num_h_t_combos = self.n_types * self.n_hos
         x1 = cp.Variable(num_structures)
         var_S = cp.Parameter( (num_h_t_combos, num_structures) ) # valid structures
@@ -54,9 +56,9 @@ class MatchNet(nn.Module):
         ------
         X: bids tensor [batch_size, n_hos, n_types]
         '''
-        z = neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [n_possible_cycles, 1]
+        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [n_possible_cycles, 1]
 
-        x_1 = linear_program_forward(z)
+        x_1 = self.linear_program_forward(z)
         return x_1
 
 def create_combined_misreport(curr_mis, true_rep, self_mask):
