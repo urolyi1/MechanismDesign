@@ -84,7 +84,7 @@ class MatchNet(nn.Module):
         leftovers = pool_reshaped - previous_allocation
 
         # todo reshape leftovers into [batch_size * n_hosp, n_types]. each of these is a bid vector for the cvxpylayer
-        
+        raise NotImplementedError
 
 
 def create_combined_misreport(curr_mis, true_rep, self_mask):
