@@ -4,10 +4,11 @@ import torch.optim as optim
 import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
+import torch.nn.functional as F
 
 class MatchNet(nn.Module):
 
-    def __init__(self, h_layers, act_funs, n_hos, n_types, S):
+    def __init__(self, h_layers, act_funs, n_hos, n_types, S, small_S):
         
         super(MatchNet, self).__init__()
         self.hid_layers = h_layers
@@ -34,18 +35,34 @@ class MatchNet(nn.Module):
         # cvxpy parameters
         self.S = S
         self.W = torch.ones(num_structures)
-        self.B = 5.0*torch.ones(num_types)
 
         self.l_prog_layer = CvxpyLayer(problem, parameters = [var_S, w, b, z], variables=[x1])
 
+        # internal match layer
+        self.small_S = small_S
+
+
+        var_small_S = cp.Parameter( (self.small_S.shape[0], self.small_S.shape[1]) )
+        w2 = cp.Parameter(self.small_S.shape[1])
+        b2 = cp.Parameter(self.small_S.shape[1])
+
+        x2 = cp.Variable(num_structures)
+
+        constraints2 = [x1 >= 0, var_small_S @ x2 <= b2]
+        objective2 = cp.Maximize( w2.T @ x1 )
+        problem2 = cp.Problem(objective2, constraints2)
+
+        # this match layer can be used batchwise to solve lots of external problems at once.
+        self.internal_match_layer = CvxpyLayer(problem2, parameters= [var_small_S, w2, b2], variables=[x2])
+
     def neural_net_forward(self, X):
-        for layer, act_f in zip(self.id_layers, act_funs):
+        for layer, act_f in zip(self.id_layers, self.act_funs):
             X = layer(X)
             X = act_f(X)
         return X
 
-    def linear_program_forward(self, z):
-        x1_out, = self.l_prog_layer(self.S, self.W, z, self.B)
+    def linear_program_forward(self, z, bids):
+        x1_out, = self.l_prog_layer(self.S, self.W, z, bids)
         return x1_out
         
     def forward(self, X):
@@ -58,8 +75,17 @@ class MatchNet(nn.Module):
         '''
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [n_possible_cycles, 1]
 
-        x_1 = self.linear_program_forward(z)
+        bids_reshaped = X.view(-1, X.shape[0]*X.shape[1])
+        x_1 = self.linear_program_forward(z, bids_reshaped)
         return x_1
+
+    def internal_allocation(self, previous_allocation, p):
+        pool_reshaped = p.view(-1, p.shape[0]*p.shape[1])
+        leftovers = pool_reshaped - previous_allocation
+
+        # todo reshape leftovers into [batch_size * n_hosp, n_types]. each of these is a bid vector for the cvxpylayer
+        
+
 
 def create_combined_misreport(curr_mis, true_rep, self_mask):
     ''' 
@@ -146,9 +172,11 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, iterations=10, l
     mis_input = create_combined_misreport(curr_mis, p)
     for i in range(iterations):
         mis_input.requires_grad_(True)
-        output = model.forward(mis_input.view(-1, n_hos * n_types))
+        allocation = model.forward(mis_input.view(-1, n_hos * n_types))
+        internal_allocation = model.compute_internal_allocation(allocation, p)
         model.zero_grad()
-        mis_util = calc_mis_util(output)
+        internal_util = calc_util(internal_allocation, S, n_hos, n_types)
+        mis_util = calc_mis_util(allocation, S, n_hos, n_types, mis_mask, internal_util)
         mis_tot_util = torch.sum(mis_util, dim)
         mis_tot_util.backward()
 
@@ -169,7 +197,7 @@ for c in range(main_iter):
 
     util = calc_util(model.forward(p))
 
-    mis_diff = nn.functional.ReLU(util - mis_util) # [batch_size, n_hos]
+    mis_diff = F.ReLU(util - mis_util) # [batch_size, n_hos]
 
     rgt = torch.mean(mis_diff, dim=0) 
 
