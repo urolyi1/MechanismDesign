@@ -7,48 +7,70 @@ from cvxpylayers.torch import CvxpyLayer
 
 class MatchNet(nn.Module):
 
-    def __init__(self, h_layers, act_funs, n_hos, n_types, S):
+    def __init__(self, h_layers, act_funs, n_hos, n_types, num_structs, S):
         
         super(MatchNet, self).__init__()
         self.hid_layers = h_layers
         self.act_funs = act_funs
         self.n_hos = n_hos
         self.n_types = n_types
-
-
+        
+        self.S = S
 
         # creating the cvxypy layer
-        num_centers = self.n_hos
-        num_structures = S.shape[1]
-        num_h_t_combos = self.n_types * self.n_hos
-        x1 = cp.Variable(num_structures)
-        var_S = cp.Parameter( (num_h_t_combos, num_structures) ) # valid structures
-        w = cp.Parameter(num_structures) # structure weight
-        z = cp.Parameter(num_structures) # control parameter
-        b = cp.Parameter(num_h_t_combos) # max bid
+        self.n_structures = num_structs # TODO: figure out how many cycles
+        self.n_h_t_combos = self.n_types * self.n_hos
 
-        constraints = [x1 >= 0,var_S @ x1 <= b]
+        x1 = cp.Variable(self.n_structures)
+        s = cp.Parameter( (self.n_h_t_combos, self.n_structures) ) # valid structures
+        w = cp.Parameter(self.n_structures) # structure weight
+        z = cp.Parameter(self.n_structures) # control parameter
+        b = cp.Parameter(self.n_h_t_combos) # max bid
+    
+        constraints = [x1 >= 0, s @ x1 <= b]
         objective = cp.Maximize( (w.T @ x1) - cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
-
-        # cvxpy parameters
-        self.S = S
-        self.W = torch.ones(num_structures)
-        self.B = 5.0*torch.ones(num_types)
-
-        self.l_prog_layer = CvxpyLayer(problem, parameters = [var_S, w, b, z], variables=[x1])
+        
+        self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
 
     def neural_net_forward(self, X):
-        for layer, act_f in zip(self.id_layers, act_funs):
-            X = layer(X)
-            X = act_f(X)
-        return X
+        '''
+        INPUT
+        ------
+        X: input [batch_size, n_hos, n_types]
+        OUTPUT
+        ------
+        Z: output [batch_size, n_structures]
+        '''
+        Z = X.view(-1, self.n_types * self.n_hos)
+        for layer, act_f in zip(self.hid_layers, self.act_funs):
+            Z = layer(Z)
+            Z = act_f(Z)
+        return Z
 
-    def linear_program_forward(self, z):
-        x1_out, = self.l_prog_layer(self.S, self.W, z, self.B)
+    def linear_program_forward(self, X, z, batch_size):
+        '''
+        INPUT
+        ------
+        X: given bids [batch_size, n_hos, n_types]
+        z: neural network output [batch_size, n_structures]
+        batch_size: number of samples in batch
+        
+        OUTPUT
+        ------
+        x1_out: allocation vector [batch_size, n_structures]
+        '''
+
+        # tile S matrix to accomodate batch_size
+        tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
+        W = torch.ones(batch_size, self.n_structures) # currently weight all structurs same
+        B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
+
+        # feed all parameters through cvxpy layer
+        x1_out, = self.l_prog_layer(tiled_S, W, B, z)
         return x1_out
         
-    def forward(self, X):
+    def forward(self, X, batch_size):
         '''
         Feed-forward output of network
 
@@ -56,9 +78,9 @@ class MatchNet(nn.Module):
         ------
         X: bids tensor [batch_size, n_hos, n_types]
         '''
-        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [n_possible_cycles, 1]
+        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
 
-        x_1 = self.linear_program_forward(z)
+        x_1 = self.linear_program_forward(X, z, batch_size)
         return x_1
 
 def create_combined_misreport(curr_mis, true_rep, self_mask):
@@ -81,7 +103,7 @@ def create_combined_misreport(curr_mis, true_rep, self_mask):
     other_hos = true_rep.view(1, -1, n_hos, n_type).repeat(n_hos, 1, 1, 1) * (1 - self_mask)
     return only_mis + other_hos
 
-def calc_internal_util(curr_mis, og):
+def calc_internal_util(p, mis_x):
     '''
     Calculate internal utility
 
@@ -146,7 +168,7 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, iterations=10, l
     mis_input = create_combined_misreport(curr_mis, p)
     for i in range(iterations):
         mis_input.requires_grad_(True)
-        output = model.forward(mis_input.view(-1, n_hos * n_types))
+        output = model.forward(mis_input.view(-1, n_hos * n_types)) 
         model.zero_grad()
         mis_util = calc_mis_util(output)
         mis_tot_util = torch.sum(mis_util, dim)
@@ -174,7 +196,7 @@ for c in range(main_iter):
     rgt = torch.mean(mis_diff, dim=0) 
 
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
-    lagr_loss = torch.sum(torch.mul(rgt , lagr_mults)) # TODO: need to initialize lagrange mults
+    lagr_loss = torch.sum(torch.mul(rgt, lagr_mults)) # TODO: need to initialize lagrange mults
     total_loss = rgt_loss + lagr_loss - torch.mean(tf.sum(util, dim=1))
 
     # TODO: define total loss optimizer
