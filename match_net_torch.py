@@ -247,7 +247,8 @@ for c in range(main_iter):
     mis_input = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
 
     model.zero_grad()
-    mis_util = model.calc_mis_util(mis_input, model.S, model.n_hos, model.n_types, mis_mask, 0)
+    output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
+    mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
     mis_diff = nn.functional.relu(util - mis_util) # [batch_size, n_hos]
