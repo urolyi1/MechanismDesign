@@ -25,9 +25,11 @@ class MatchNet(nn.Module):
         w = cp.Parameter(self.n_structures) # structure weight
         z = cp.Parameter(self.n_structures) # control parameter
         b = cp.Parameter(self.n_h_t_combos) # max bid
+
+        self.control_strength = 10.0
     
         constraints = [x1 >= 0, s @ x1 <= b]
-        objective = cp.Maximize( (w.T @ x1) - cp.norm(x1 - z, 2) )
+        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
         
         self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
@@ -239,7 +241,7 @@ max_bids = 100
 
 model = MatchNet(N_HOS, N_TYP, num_structures, single_s)
 
-model_optim = optim.Adam(params=model.parameters(), lr=1e-5)
+model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
