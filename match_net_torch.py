@@ -105,7 +105,8 @@ class MatchNet(nn.Module):
         '''
         only_mis = curr_mis.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * self_mask 
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
-        return only_mis + other_hos
+        result = only_mis + other_hos
+        return result.clone().detach().requires_grad_(True)
 
     def calc_internal_util(self, p, mis_x):
         '''
@@ -188,8 +189,7 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
     # not convinced this method is totally correct but sketches out what we want to do
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
     for i in range(iterations):
-        mis_input.requires_grad_(True)
-        output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos) 
+        output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
         model.zero_grad()
         mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
