@@ -215,7 +215,7 @@ self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
 mis_mask = torch.zeros(N_HOS, 1, N_HOS)
 mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
-main_iter = 5 # number of training iterations
+main_iter = 20 # number of training iterations
 
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,0.0,1.0,1.0,0.0],
@@ -242,6 +242,7 @@ max_bids = 100
 model = MatchNet(N_HOS, N_TYP, num_structures, single_s)
 
 model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
+lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
@@ -250,7 +251,6 @@ for c in range(main_iter):
 
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
-    model.zero_grad()
     output = model.forward(mis_input, batch_size * model.n_hos)
     mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
@@ -262,6 +262,15 @@ for c in range(main_iter):
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
     total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
-    print(total_loss.item())
+    print('total loss', total_loss.item())
+    print('rgt_loss', rgt_loss.item())
+    print('lagr_loss', lagr_loss.item())
+
+    if c % 5 == 0:
+        lagr_optim.zero_grad()
+        (-lagr_loss).backward(retain_graph=True)
+        lagr_optim.step()
+
+    model_optim.zero_grad()
     total_loss.backward()
     model_optim.step()
