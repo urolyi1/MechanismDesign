@@ -197,8 +197,10 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
         with torch.no_grad(): # do we need no_grad() here?
             print(mis_input.requires_grad)
             mis_input.data += lr * mis_input.grad
-            # mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
+            mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
         mis_input.detach()
+    return mis_util
+       
 # parameters
 N_HOS = 2
 N_TYP = 3
@@ -224,14 +226,16 @@ single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,1.0,0.0,1.0,0.0]], requires_grad=False).t()
 
 
+rho = 1.0
+
 # true input by batch dim [batch size, n_hos, n_types]
 p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float() 
 
 # initializing lagrange multipliers to 1
 lagr_mults = torch.ones(N_HOS) #TODO: Maybe better initilization?
 
-min_bids = None # these are values to clamp bids, i.e. must be above 0 and below true pool
-max_bids = None
+min_bids = 0 # these are values to clamp bids, i.e. must be above 0 and below true pool
+max_bids = 100
 
 # Making model
 layers = [nn.Linear(6, 20), nn.Linear(20, 20), nn.Linear(20, 20), nn.Linear(20, 8)]
@@ -243,14 +247,14 @@ model = MatchNet(layers, act_funs, N_HOS, N_TYP, num_structures, single_s)
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
     
-    optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
+    mis_util = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
 
-    util = calc_util(model.forward(p), single_s, N_HOS, N_TYP)
+    util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
-    mis_diff = nn.functional.ReLU(util - mis_util) # [batch_size, n_hos]
+    mis_diff = nn.functional.relu(util - mis_util) # [batch_size, n_hos]
 
     rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
-    total_loss = rgt_loss + lagr_loss - torch.mean(tf.sum(util, dim=1))
+    total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
