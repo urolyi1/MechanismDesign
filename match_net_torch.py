@@ -5,13 +5,12 @@ import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 
+
 class MatchNet(nn.Module):
 
-    def __init__(self, h_layers, act_funs, n_hos, n_types, num_structs, S):
+    def __init__(self,  n_hos, n_types, num_structs, S):
         
         super(MatchNet, self).__init__()
-        self.hid_layers = h_layers
-        self.act_funs = act_funs
         self.n_hos = n_hos
         self.n_types = n_types
         
@@ -33,6 +32,8 @@ class MatchNet(nn.Module):
         
         self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
 
+        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8), nn.Tanh())
+
     def neural_net_forward(self, X):
         '''
         INPUT
@@ -43,10 +44,8 @@ class MatchNet(nn.Module):
         Z: output [batch_size, n_structures]
         '''
         Z = X.view(-1, self.n_types * self.n_hos)
-        for layer, act_f in zip(self.hid_layers, self.act_funs):
-            Z = layer(Z)
-            Z = act_f(Z)
-        return Z
+
+        return self.neural_net(Z)
 
     def linear_program_forward(self, X, z, batch_size):
         '''
@@ -199,8 +198,8 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
             mis_input.data += lr * mis_input.grad
             mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
         mis_input.detach()
-    return mis_util
-       
+    return mis_input
+
 # parameters
 N_HOS = 2
 N_TYP = 3
@@ -214,7 +213,7 @@ self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
 mis_mask = torch.zeros(N_HOS, 1, N_HOS)
 mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
-main_iter = 1 # number of training iterations
+main_iter = 2 # number of training iterations
 
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,0.0,1.0,1.0,0.0],
@@ -230,7 +229,6 @@ rho = 1.0
 
 # true input by batch dim [batch size, n_hos, n_types]
 p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float() 
-
 # initializing lagrange multipliers to 1
 lagr_mults = torch.ones(N_HOS) #TODO: Maybe better initilization?
 
@@ -238,17 +236,18 @@ min_bids = 0 # these are values to clamp bids, i.e. must be above 0 and below tr
 max_bids = 100
 
 # Making model
-layers = [nn.Linear(6, 20), nn.Linear(20, 20), nn.Linear(20, 20), nn.Linear(20, 8)]
-act_funs = [nn.Tanh(), nn.Tanh(), nn.Tanh(), nn.Tanh()]
 
-model = MatchNet(layers, act_funs, N_HOS, N_TYP, num_structures, single_s)
+model = MatchNet(N_HOS, N_TYP, num_structures, single_s)
 
+model_optim = optim.Adam(params=model.parameters(), lr=1e-3)
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
     
-    mis_util = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
+    mis_input = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
 
+    model.zero_grad()
+    mis_util = model.calc_mis_util(mis_input, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
     mis_diff = nn.functional.relu(util - mis_util) # [batch_size, n_hos]
@@ -258,3 +257,5 @@ for c in range(main_iter):
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
     total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+    total_loss.backward()
+    model_optim.step()
