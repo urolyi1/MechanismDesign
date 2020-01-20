@@ -32,7 +32,7 @@ class MatchNet(nn.Module):
         
         self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
 
-        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8), nn.Tanh())
+        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8))
 
     def neural_net_forward(self, X):
         '''
@@ -102,10 +102,10 @@ class MatchNet(nn.Module):
         combined: dim [n_hos, batch_size, n_hos, n_type]
 
         '''
-        only_mis = curr_mis.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * self_mask 
+        only_mis = curr_mis.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * self_mask
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
         result = only_mis + other_hos
-        return result.clone().detach().requires_grad_(True)
+        return result
 
     def calc_internal_util(self, p, mis_x):
         '''
@@ -167,7 +167,7 @@ class MatchNet(nn.Module):
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
 
 
-def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=10, lr=1e-3):
+def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
     '''
     Inner optimization to find best misreports
 
@@ -186,19 +186,19 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
     None
     '''
     # not convinced this method is totally correct but sketches out what we want to do
-    mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
     for i in range(iterations):
-        output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
+        mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
         model.zero_grad()
+        output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
         mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
         with torch.no_grad(): # do we need no_grad() here?
-            print(mis_input.requires_grad)
-            mis_input.data += lr * mis_input.grad
-            mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
-            mis_input.grad.zero_()
-    return mis_input.detach()
+            curr_mis.data += lr * curr_mis.grad
+            curr_mis.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
+            curr_mis.grad.zero_()
+    #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
+    return curr_mis.detach()
 
 # parameters
 N_HOS = 2
@@ -213,7 +213,7 @@ self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
 mis_mask = torch.zeros(N_HOS, 1, N_HOS)
 mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
-main_iter = 2 # number of training iterations
+main_iter = 5 # number of training iterations
 
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,0.0,1.0,1.0,0.0],
@@ -239,15 +239,17 @@ max_bids = 100
 
 model = MatchNet(N_HOS, N_TYP, num_structures, single_s)
 
-model_optim = optim.Adam(params=model.parameters(), lr=1e-3)
+model_optim = optim.Adam(params=model.parameters(), lr=1e-5)
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
-    
-    mis_input = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
+
+    curr_mis = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=5)
+
+    mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
     model.zero_grad()
-    output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
+    output = model.forward(mis_input, batch_size * model.n_hos)
     mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
@@ -258,5 +260,6 @@ for c in range(main_iter):
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
     total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+    print(total_loss.item())
     total_loss.backward()
     model_optim.step()
