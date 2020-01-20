@@ -197,8 +197,8 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
             print(mis_input.requires_grad)
             mis_input.data += lr * mis_input.grad
             mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
-        mis_input.detach()
-    return mis_input
+            mis_input.grad.zero_()
+    return mis_input.detach()
 
 # parameters
 N_HOS = 2
