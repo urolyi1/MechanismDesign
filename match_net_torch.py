@@ -199,7 +199,6 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
             mis_input.data += lr * mis_input.grad
             # mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
         mis_input.detach()
-
 # parameters
 N_HOS = 2
 N_TYP = 3
@@ -255,7 +254,3 @@ for c in range(main_iter):
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
     total_loss = rgt_loss + lagr_loss - torch.mean(tf.sum(util, dim=1))
-
-
-
-
