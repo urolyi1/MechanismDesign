@@ -96,9 +96,9 @@ class MatchNet(nn.Module):
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         '''
-        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size * self.n_hos, 1, 1)
-        W = torch.ones(batch_size * self.n_hos, self.int_structures)
-        B = X.view(batch_size * self.n_hos, self.n_types)
+        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
+        W = torch.ones(batch_size, self.int_structures)
+        B = X.view(batch_size, self.n_types)
 
         x_int_out, = self.int_layer(tiled_S, W, B)
         return x_int_out
@@ -157,7 +157,7 @@ class MatchNet(nn.Module):
         raise NotImplementedError
         
 
-    def calc_mis_util(self, mis_alloc, S, n_hos, n_types, mis_mask, internal_util):
+    def calc_mis_util(self, p, mis_alloc, S, n_hos, n_types, mis_mask, internal_util):
         '''
         Takes misreport allocation and computes utility
         
@@ -181,6 +181,18 @@ class MatchNet(nn.Module):
         central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask # [n_hos, batch_size, n_hos]
         central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
         central_util = central_util.transpose(0, 1) # [batch_size, n_hos]
+
+        # TODO possibly replace later if slow
+
+        utils = []
+        for i in range(self.n_hos):
+            curr_hos_leftovers = p[:, i, :] - (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
+            curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
+            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)
+            utils.append(torch.sum(counts, dim=1))
+        internal_util = torch.stack(utils, dim=1)
+
+
 
         
         return central_util + internal_util # sum utility from central mechanism and internal matching
@@ -233,7 +245,7 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-        mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
+        mis_util = model.calc_mis_util(p, output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
@@ -302,7 +314,7 @@ for c in range(main_iter):
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
     output = model.forward(mis_input, batch_size * model.n_hos)
-    mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0)
+    mis_util = model.calc_mis_util(p, output, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
     mis_diff = nn.functional.relu(util - mis_util) # [batch_size, n_hos]
