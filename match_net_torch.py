@@ -35,19 +35,19 @@ class MatchNet(nn.Module):
         
         self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
 
-        ## INTERNAL MATCHING CVXPY LAYER ##
-        self.int_structurues = int_structs
+        # INTERNAL MATCHING CVXPY LAYER
+        self.int_structures = int_structs
 
-        x_int = cp.Variable( self.int_structurues )
-        int_s = cp.Parameter( (self.n_types, self.int_structurues) )
-        int_w = cp.Parameter( self.int_structurues )
+        x_int = cp.Variable( self.int_structures )
+        int_s = cp.Parameter( (self.n_types, self.int_structures) )
+        int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
         int_constraints = [x_int >= 0, s @ x_int <= b ] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x_int) )
-        problem = cp.Problem(objective, constraint)
+        problem = cp.Problem(objective, int_constraints)
 
-        self.int_layer = CvxpyLayer(problem, parameters = [int_s, int_w, int_b], variables=[x_int])
+        self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
 
         self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20),
                                         nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8))
@@ -96,9 +96,9 @@ class MatchNet(nn.Module):
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         '''
-        tiled_S = self.int_S.view(1, self.n_types, self.int_structurues).repeat(batch_size * self.n_hos, 1, 1)
-        W = torch.ones(batch_size * self.n_hos, self.int_structurues)
-        B = X.view(batch_size * n_hos, self.n_types)
+        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size * self.n_hos, 1, 1)
+        W = torch.ones(batch_size * self.n_hos, self.int_structures)
+        B = X.view(batch_size * self.n_hos, self.n_types)
 
         x_int_out, = self.int_layer(tiled_S, W, B)
         return x_int_out
@@ -222,7 +222,7 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
     '''
     # not convinced this method is totally correct but sketches out what we want to do
     for i in range(iterations):
-        # tile current best misreports into valid inputes
+        # tile current best misreports into valid inputs
         mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
         
         model.zero_grad()
