@@ -8,7 +8,7 @@ from cvxpylayers.torch import CvxpyLayer
 
 class MatchNet(nn.Module):
 
-    def __init__(self,  n_hos, n_types, num_structs, S, int_S):
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S):
         
         super(MatchNet, self).__init__()
         self.n_hos = n_hos
@@ -17,7 +17,7 @@ class MatchNet(nn.Module):
         self.S = S
         self.int_S = int_S
 
-        # creating the cvxypy layer
+        # creating the central matching cvxypy layer
         self.n_structures = num_structs # TODO: figure out how many cycles
         self.n_h_t_combos = self.n_types * self.n_hos
 
@@ -29,13 +29,28 @@ class MatchNet(nn.Module):
 
         self.control_strength = 10.0
     
-        constraints = [x1 >= 0, s @ x1 <= b]
+        constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
         
         self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
 
-        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8))
+        ## INTERNAL MATCHING CVXPY LAYER ##
+        self.int_structurues = int_structs
+
+        x_int = cp.Variable( self.int_structurues )
+        int_s = cp.Parameter( (self.n_types, self.int_structurues) )
+        int_w = cp.Parameter( self.int_structurues )
+        int_b = cp.Parameter( self.n_types )
+
+        int_constraints = [x_int >= 0, s @ x_int <= b ] # constraint for positive allocation and less than true bid
+        objective = cp.Maximize( (w.T @ x_int) )
+        problem = cp.Problem(objective, constraint)
+
+        self.int_layer = CvxpyLayer(problem, parameters = [int_s, int_w, int_b], variables=[x_int])
+
+        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20),
+                                        nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8))
 
     def neural_net_forward(self, X):
         '''
@@ -81,7 +96,12 @@ class MatchNet(nn.Module):
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         '''
-        tiled_S = 
+        tiled_S = self.int_S.view(1, self.n_types, self.int_structurues).repeat(batch_size * self.n_hos, 1, 1)
+        W = torch.ones(batch_size * self.n_hos, self.int_structurues)
+        B = X.view(batch_size * n_hos, self.n_types)
+
+        x_int_out, = self.int_layer(tiled_S, W, B)
+        return x_int_out
         
     def forward(self, X, batch_size):
         '''
