@@ -134,6 +134,7 @@ class MatchNet(nn.Module):
         ------
         internal_util: the utility from the internal matching for each hospital [batch_size, n_hos]
         '''
+        raise NotImplementedError
         
 
     def calc_mis_util(self, mis_alloc, S, n_hos, n_types, mis_mask, internal_util):
@@ -188,8 +189,8 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
     INPUT
     ------
     model: MatchNet object
-    curr_mis: current misreports (duplicate of truthful bids)
-    p: truthful bids
+    curr_mis: current misreports (duplicate of truthful bids) [batch_size, n_hos, n_types]
+    p: truthful bids [batch_size, n_hos, n_types]
     min_bids: lowest amount a hospital can misreport
     max_mid: ceiling of hospital misreport
     iterations: number of iterations to optimize misreports
@@ -197,16 +198,24 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
 
     OUTPUT
     -------
-    None
+    curr_mis: current best misreport for each hospital when others report truthfully [batch_size, n_hos, n_types]
     '''
     # not convinced this method is totally correct but sketches out what we want to do
     for i in range(iterations):
+        # tile current best misreports into valid inputes
         mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+        
         model.zero_grad()
+
+        # push tiled misreports through network
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
+
+        # calculate utility from output only weighting utility from misreporting hospital
         mis_util = model.calc_mis_util(output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
+
+        # Gradient descent
         with torch.no_grad(): # do we need no_grad() here?
             curr_mis.data += lr * curr_mis.grad
             curr_mis.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
@@ -230,6 +239,7 @@ mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
 main_iter = 20 # number of training iterations
 
+# Large compatibility matrix [n_hos_pair_combos, n_structures]
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,0.0,1.0,1.0,0.0],
                          [1.0,0.0,0.0,0.0,1.0,0.0],
@@ -239,12 +249,15 @@ single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,1.0,0.0,0.0,0.0,1.0],
                          [0.0,0.0,1.0,0.0,1.0,0.0]], requires_grad=False).t()
 
+# Internal compatbility matrix [n_types, n_int_structures]
 internal_s = torch.tensor([[1.0,1.0,0.0],[0.0,1.0,1.0]], requires_grad=False).t()
 
+# regret quadratic term weight
 rho = 1.0
 
 # true input by batch dim [batch size, n_hos, n_types]
 p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float() 
+
 # initializing lagrange multipliers to 1
 lagr_mults = torch.ones(N_HOS) #TODO: Maybe better initilization?
 
@@ -257,6 +270,7 @@ model = MatchNet(N_HOS, N_TYP, num_structures, single_s, internal_s)
 
 model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
 lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
+
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
