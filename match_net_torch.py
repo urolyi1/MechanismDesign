@@ -8,13 +8,14 @@ from cvxpylayers.torch import CvxpyLayer
 
 class MatchNet(nn.Module):
 
-    def __init__(self,  n_hos, n_types, num_structs, S):
+    def __init__(self,  n_hos, n_types, num_structs, S, int_S):
         
         super(MatchNet, self).__init__()
         self.n_hos = n_hos
         self.n_types = n_types
         
         self.S = S
+        self.int_S = int_S
 
         # creating the cvxypy layer
         self.n_structures = num_structs # TODO: figure out how many cycles
@@ -68,6 +69,17 @@ class MatchNet(nn.Module):
         # feed all parameters through cvxpy layer
         x1_out, = self.l_prog_layer(tiled_S, W, B, z)
         return x1_out
+
+    def internal_linear_prog(self, X, batch_size):
+        '''
+        INPUT
+        ------
+        X: All internal bids [batch_size * n_hos, n_types]
+        batch_size: number of samples in batch
+
+        x1_out: allocation vector [batch_size * n_hos, n_structures]
+        '''
+        tiled_S = 
         
     def forward(self, X, batch_size):
         '''
@@ -120,7 +132,7 @@ class MatchNet(nn.Module):
         ------
         internal_util: the utility from the internal matching for each hospital [batch_size, n_hos]
         '''
-        return 0
+        
 
     def calc_mis_util(self, mis_alloc, S, n_hos, n_types, mis_mask, internal_util):
         '''
@@ -167,7 +179,7 @@ class MatchNet(nn.Module):
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
 
 
-def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=10, lr=1e-3):
+def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
     '''
     Inner optimization to find best misreports
 
@@ -198,6 +210,8 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
             mis_input.data += lr * mis_input.grad
             mis_input.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
             mis_input.grad.zero_()
+        curr_mis = mis_input[np.arange(model.n_hos), :, np.arange(model.n_hos), :].transpose(0, 1)
+        
     return mis_input.detach()
 
 # parameters
@@ -213,7 +227,7 @@ self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
 mis_mask = torch.zeros(N_HOS, 1, N_HOS)
 mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
-main_iter = 2 # number of training iterations
+main_iter = 1 # number of training iterations
 
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,0.0,0.0,1.0,1.0,0.0],
@@ -224,6 +238,7 @@ single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
                          [0.0,1.0,0.0,0.0,0.0,1.0],
                          [0.0,0.0,1.0,0.0,1.0,0.0]], requires_grad=False).t()
 
+internal_s = torch.tensor([[1.0,1.0,0.0],[0.0,1.0,1.0]], requires_grad=False).t()
 
 rho = 1.0
 
@@ -237,7 +252,7 @@ max_bids = 100
 
 # Making model
 
-model = MatchNet(N_HOS, N_TYP, num_structures, single_s)
+model = MatchNet(N_HOS, N_TYP, num_structures, single_s, internal_s)
 
 model_optim = optim.Adam(params=model.parameters(), lr=1e-3)
 # Training loop
@@ -245,6 +260,7 @@ for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
     
     mis_input = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size)
+    curr_mis = mis_input[np.arange(model.n_hos), :, np.arange(model.n_hos), :].transpose(0, 1)
 
     model.zero_grad()
     output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
