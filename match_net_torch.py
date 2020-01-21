@@ -4,7 +4,7 @@ import torch.optim as optim
 import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
-
+import diffcp
 
 class MatchNet(nn.Module):
 
@@ -33,7 +33,7 @@ class MatchNet(nn.Module):
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
         
-        self.l_prog_layer = CvxpyLayer(problem, parameters = [s, w, b, z], variables=[x1])
+        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
 
         # INTERNAL MATCHING CVXPY LAYER
         self.int_structures = int_structs
@@ -84,7 +84,7 @@ class MatchNet(nn.Module):
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, z)
+        x1_out, = self.l_prog_layer(tiled_S, W, B, z, solver_args={'max_iters': 50000})
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
@@ -100,7 +100,8 @@ class MatchNet(nn.Module):
         W = torch.ones(batch_size, self.int_structures)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B)
+        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000})
+
         return x_int_out
         
     def forward(self, X, batch_size):
@@ -183,10 +184,10 @@ class MatchNet(nn.Module):
         central_util = central_util.transpose(0, 1) # [batch_size, n_hos]
 
         # TODO possibly replace later if slow
-
         utils = []
         for i in range(self.n_hos):
-            curr_hos_leftovers = p[:, i, :] - (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
+            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
+            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
             curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
             counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)
             utils.append(torch.sum(counts, dim=1))
@@ -271,7 +272,7 @@ mis_mask = torch.zeros(N_HOS, 1, N_HOS)
 mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
 
-main_iter = 20 # number of training iterations
+main_iter = 30 # number of training iterations
 
 # Large compatibility matrix [n_hos_pair_combos, n_structures]
 single_s = torch.tensor([[1.0,1.0,0.0,0.0,0.0,0.0],
@@ -317,7 +318,7 @@ for c in range(main_iter):
     mis_util = model.calc_mis_util(p, output, model.S, model.n_hos, model.n_types, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
-    mis_diff = nn.functional.relu(util - mis_util) # [batch_size, n_hos]
+    mis_diff = (mis_util - util) # [batch_size, n_hos]
 
     rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
