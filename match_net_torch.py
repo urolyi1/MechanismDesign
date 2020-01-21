@@ -43,8 +43,8 @@ class MatchNet(nn.Module):
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, s @ x_int <= b ] # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (w.T @ x_int) )
+        int_constraints = [x_int >= 0, int_s @ x_int <= int_b ] # constraint for positive allocation and less than true bid
+        objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
         self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
@@ -181,6 +181,7 @@ class MatchNet(nn.Module):
         central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask # [n_hos, batch_size, n_hos]
         central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
         central_util = central_util.transpose(0, 1) # [batch_size, n_hos]
+
         
         return central_util + internal_util # sum utility from central mechanism and internal matching
 
@@ -199,6 +200,7 @@ class MatchNet(nn.Module):
         '''
 
         allocation = alloc_vec @ torch.transpose(S, 0, 1) # [batch_size, n_hos * n_types]
+
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
 
 
@@ -286,7 +288,7 @@ max_bids = 100
 
 # Making model
 
-model = MatchNet(N_HOS, N_TYP, num_structures, single_s, internal_s)
+model = MatchNet(N_HOS, N_TYP, num_structures, 2, single_s, internal_s)
 
 model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
 lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
