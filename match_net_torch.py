@@ -189,7 +189,15 @@ class MatchNet(nn.Module):
             allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
             minquantity = (torch.min(p[:,i,:] - allocated)).item()
             if minquantity <= 0:
-                assert(abs(minquantity) < 1e-4)
+                try:
+                    assert(abs(minquantity) < 1e-3)
+                except:
+                    print(allocated)
+                    print(p[:, i, :])
+                    print(p[:,i,:] - allocated)
+                    print(abs(minquantity))
+                    assert (abs(minquantity) < 1e-3)
+
 
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
             curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
