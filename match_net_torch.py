@@ -189,9 +189,9 @@ class MatchNet(nn.Module):
             allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
             curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
-            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)
+            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1) # [batch_size, n_types]
             utils.append(torch.sum(counts, dim=1))
-        internal_util = torch.stack(utils, dim=1)
+        internal_util = torch.stack(utils, dim=1) # [batch_size, n_hos]
         return central_util + internal_util # sum utility from central mechanism and internal matching
 
     def calc_util(self, alloc_vec, S, n_hos, n_types):
