@@ -158,7 +158,7 @@ class MatchNet(nn.Module):
         raise NotImplementedError
         
 
-    def calc_mis_util(self, p, mis_alloc, S, n_hos, n_types, mis_mask, internal_util):
+    def calc_mis_util(self, p, mis_alloc, S, mis_mask, internal_util):
         '''
         Takes misreport allocation and computes utility
         
@@ -192,10 +192,6 @@ class MatchNet(nn.Module):
             counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)
             utils.append(torch.sum(counts, dim=1))
         internal_util = torch.stack(utils, dim=1)
-
-
-
-        
         return central_util + internal_util # sum utility from central mechanism and internal matching
 
     def calc_util(self, alloc_vec, S, n_hos, n_types):
@@ -217,7 +213,7 @@ class MatchNet(nn.Module):
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
 
 
-def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
+def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
     '''
     Inner optimization to find best misreports
 
@@ -246,14 +242,14 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-        mis_util = model.calc_mis_util(p, output, model.S, model.n_hos, model.n_types, mis_mask, 0) # FIX inputs
+        mis_util = model.calc_mis_util(p, output, model.S, mis_mask, 0) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
         # Gradient descent
         with torch.no_grad():
             curr_mis = curr_mis + lr * curr_mis.grad
-            curr_mis = torch.max( torch.min(curr_mis, p), torch.zeros_like(curr_mis) )
+            curr_mis = torch.max( torch.min(curr_mis, p), torch.zeros_like(curr_mis) ) # clamping misreports to be valid
         curr_mis.requires_grad_(True)
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
@@ -294,37 +290,40 @@ rho = 1.0
 p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float() 
 
 # initializing lagrange multipliers to 1
-lagr_mults = torch.ones(N_HOS) #TODO: Maybe better initilization?
-
-min_bids = 0 # these are values to clamp bids, i.e. must be above 0 and below true pool
-max_bids = 100
+lagr_mults = torch.ones(N_HOS) # TODO: Maybe better initilization?
 
 # Making model
-
 model = MatchNet(N_HOS, N_TYP, num_structures, 2, single_s, internal_s)
 
 model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
 lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
 
+tot_loss_lst = []
+rgt_loss_lst = []
 # Training loop
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
 
-    curr_mis = optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_mask, batch_size, iterations=5)
+    curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=5)
 
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
     output = model.forward(mis_input, batch_size * model.n_hos)
-    mis_util = model.calc_mis_util(p, output, model.S, model.n_hos, model.n_types, mis_mask, 0)
+    mis_util = model.calc_mis_util(p, output, model.S, mis_mask, 0)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
     mis_diff = (mis_util - util) # [batch_size, n_hos]
 
     rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
+    # computes losses
     rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
     lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
     total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+
+    tot_loss_lst.append(total_loss.item())
+    rgt_loss_lst.append(rgt_loss.item())
+
     print('total loss', total_loss.item())
     print('rgt_loss', rgt_loss.item())
     print('lagr_loss', lagr_loss.item())
@@ -337,3 +336,6 @@ for c in range(main_iter):
     model_optim.zero_grad()
     total_loss.backward()
     model_optim.step()
+
+print(tot_loss_lst)
+print(rgt_loss_lst)
