@@ -5,6 +5,7 @@ import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 import diffcp
+import time
 
 class MatchNet(nn.Module):
 
@@ -200,7 +201,13 @@ class MatchNet(nn.Module):
 
 
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
-            curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
+            try:
+                curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
+            except diffcp.cone_program.SolverError:
+                np.save(f'p_error_{time.time()}.npy', p.numpy())
+                np.save(f'allocated_error_{time.time()}.npy', allocated.numpy())
+                raise
+
             counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1) # [batch_size, n_types]
             utils.append(torch.sum(counts, dim=1))
         internal_util = torch.stack(utils, dim=1) # [batch_size, n_hos]
@@ -316,7 +323,7 @@ rgt_loss_lst = []
 for c in range(main_iter):
     curr_mis = p.clone().detach().requires_grad_(True)
 
-    curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=5)
+    curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=10)
 
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
