@@ -338,6 +338,7 @@ for c in range(main_iter):
 
     print('total loss', total_loss.item())
     print('rgt_loss', rgt_loss.item())
+    print('mean regret', torch.mean(rgt).item())
     print('lagr_loss', lagr_loss.item())
 
     if c % 5 == 0:
