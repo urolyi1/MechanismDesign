@@ -158,7 +158,7 @@ class MatchNet(nn.Module):
         raise NotImplementedError
         
 
-    def calc_mis_util(self, p, mis_alloc, S, mis_mask, internal_util):
+    def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         '''
         Takes misreport allocation and computes utility
         
@@ -242,7 +242,7 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask, 0) # FIX inputs
+        mis_util = model.calc_mis_util(p, output, model.S, mis_mask) # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
@@ -309,7 +309,7 @@ for c in range(main_iter):
     mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
     output = model.forward(mis_input, batch_size * model.n_hos)
-    mis_util = model.calc_mis_util(p, output, model.S, mis_mask, 0)
+    mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
     util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
 
     mis_diff = (mis_util - util) # [batch_size, n_hos]
