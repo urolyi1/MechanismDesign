@@ -187,6 +187,10 @@ class MatchNet(nn.Module):
         utils = []
         for i in range(self.n_hos):
             allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
+            minquantity = (torch.min(p[:,i,:] - allocated)).item()
+            if minquantity <= 0:
+                assert(abs(minquantity) < 1e-4)
+
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
             curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
             counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1) # [batch_size, n_types]
