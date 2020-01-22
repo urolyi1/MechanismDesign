@@ -251,10 +251,10 @@ def optimize_misreports(model, curr_mis, p, min_bids, max_bids, mis_mask, self_m
         mis_tot_util.backward()
 
         # Gradient descent
-        with torch.no_grad(): # do we need no_grad() here?
-            curr_mis.data += lr * curr_mis.grad
-            curr_mis.clamp_(min_bids, max_bids) # Probably can't use clamp and will need to use min and max
-            curr_mis.grad.zero_()
+        with torch.no_grad():
+            curr_mis = curr_mis + lr * curr_mis.grad
+            curr_mis = torch.max( torch.min(curr_mis, p), torch.zeros_like(curr_mis) )
+        curr_mis.requires_grad_(True)
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
 
