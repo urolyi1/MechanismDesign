@@ -33,7 +33,7 @@ class GreedyMatcher(nn.Module):
         objective = cp.Maximize((w.T @ x1))
         problem = cp.Problem(objective, constraints)
 
-        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
+        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b], variables=[x1])
 
         # INTERNAL MATCHING CVXPY LAYER
         self.int_structures = int_structs
