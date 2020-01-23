@@ -4,50 +4,8 @@ import torch.optim as optim
 import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
+import HospitalGenerators as gens
 import diffcp
-
-class SingleHospital:
-    def __init__(self, n_types, dist_lst):
-        ''' Takes in number of pair types along with a list of functions that
-        generate the number of people in that hospital with pair type.
-        '''
-        self.n_types = n_types
-        self.dists = dist_lst
-    def generate(self, batch_size):
-        '''generate a report from this hospital'''
-        X = np.zeros((batch_size, self.n_types))
-        for i, dist in enumerate(self.dists):
-            X[:, i] = dist(size=batch_size)
-        return X
-
-
-class ReportGenerator:
-    def __init__(self, hos_lst, single_report_shape):
-        self.hospitals = hos_lst
-        self.single_shape = single_report_shape
-
-    def generate_report(self, batch_size):
-        X = np.zeros((batch_size,) + self.single_shape)
-        for i, hos in enumerate(self.hospitals):
-            X[:, i, :] = hos.generate(batch_size)
-        yield X
-
-
-def randint(low, high):
-    return lambda size: np.random.randint(low, high, size)
-
-
-def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
-    ''' Creates a generator object to create batches'''
-    hos_lst = []
-    for h in range(n_hos):
-        tmp_dist_lst = []
-        for t in range(n_types):
-            tmp_dist_lst.append(randint(low_lst_lst[h][t], high_lst_lst[h][t]))
-        hos_lst.append(SingleHospital(n_types, tmp_dist_lst))
-    gen = ReportGenerator(hos_lst, (n_hos, n_types))
-    return gen
-
 
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
@@ -104,7 +62,7 @@ class GreedyMatcher(nn.Module):
 
 
     def linear_program_forward(self, X, batch_size):
-        '''
+        """
         INPUT
         ------
         X: given bids [batch_size, n_hos, n_types]
@@ -114,7 +72,7 @@ class GreedyMatcher(nn.Module):
         OUTPUT
         ------
         x1_out: allocation vector [batch_size, n_structures]
-        '''
+        """
 
         # tile S matrix to accomodate batch_size
         tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
@@ -126,14 +84,14 @@ class GreedyMatcher(nn.Module):
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
-        '''
+        """
         INPUT
         ------
         X: All internal bids [batch_size * n_hos, n_types]
         batch_size: number of samples in batch
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
-        '''
+        """
         tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
         W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
@@ -143,7 +101,7 @@ class GreedyMatcher(nn.Module):
         return x_int_out
 
     def forward(self, X, batch_size):
-        '''
+        """
         Feed-forward output of network
 
         INPUT
@@ -153,13 +111,13 @@ class GreedyMatcher(nn.Module):
         OUTPUT
         ------
         x_1: allocation vector [batch_size, n_structures]
-        '''
+        """
 
         x_1 = self.linear_program_forward(X, batch_size)
         return x_1
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
-        '''
+        """
         Tiles and combines curr misreport and true rep to create output tensor
         where only one hospital is misreporting at a time
 
@@ -173,14 +131,14 @@ class GreedyMatcher(nn.Module):
         ------
         combined: dim [n_hos, batch_size, n_hos, n_type]
 
-        '''
+        """
         only_mis = curr_mis.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * self_mask
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
         result = only_mis + other_hos
         return result
 
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
-        '''
+        """
         Takes misreport allocation and computes utility
 
         INPUT
@@ -195,7 +153,7 @@ class GreedyMatcher(nn.Module):
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility from misreporting in sample 0
-        '''
+        """
         batch_size = int(mis_alloc.size()[0] / self.n_hos)
         alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0,
                                                                                 1)  # [n_hos, batch_size, n_hos * n_types]
@@ -228,8 +186,8 @@ class GreedyMatcher(nn.Module):
         internal_util = torch.stack(utils, dim=1)  # [batch_size, n_hos]
         return central_util + internal_util  # sum utility from central mechanism and internal matching
 
-    def calc_util(self, alloc_vec, S, n_hos, n_types):
-        '''
+    def calc_util(self, alloc_vec, S):
+        """
         Takes truthful allocation and computes utility
 
         INPUT
@@ -240,7 +198,7 @@ class GreedyMatcher(nn.Module):
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
-        '''
+        """
 
         allocation = alloc_vec @ torch.transpose(S, 0, 1)  # [batch_size, n_hos * n_types]
 
@@ -259,14 +217,14 @@ class MatchNet(nn.Module):
         self.int_S = int_S
 
         # creating the central matching cvxypy layer
-        self.n_structures = num_structs # TODO: figure out how many cycles
+        self.n_structures = num_structs  # TODO: figure out how many cycles
         self.n_h_t_combos = self.n_types * self.n_hos
 
         x1 = cp.Variable(self.n_structures)
         s = cp.Parameter( (self.n_h_t_combos, self.n_structures) ) # valid structures
-        w = cp.Parameter(self.n_structures) # structure weight
-        z = cp.Parameter(self.n_structures) # control parameter
-        b = cp.Parameter(self.n_h_t_combos) # max bid
+        w = cp.Parameter(self.n_structures)  # structure weight
+        z = cp.Parameter(self.n_structures)  # control parameter
+        b = cp.Parameter(self.n_h_t_combos)  # max bid
 
         self.control_strength = 10.0
     
@@ -302,20 +260,20 @@ class MatchNet(nn.Module):
             self.internalW = torch.ones(self.int_structures)
 
     def neural_net_forward(self, X):
-        '''
+        """
         INPUT
         ------
         X: input [batch_size, n_hos, n_types]
         OUTPUT
         ------
         Z: output [batch_size, n_structures]
-        '''
+        """
         Z = X.view(-1, self.n_types * self.n_hos)
 
         return self.neural_net(Z)
 
     def linear_program_forward(self, X, z, batch_size):
-        '''
+        """
         INPUT
         ------
         X: given bids [batch_size, n_hos, n_types]
@@ -325,9 +283,9 @@ class MatchNet(nn.Module):
         OUTPUT
         ------
         x1_out: allocation vector [batch_size, n_structures]
-        '''
+        """
 
-        # tile S matrix to accomodate batch_size
+        # tile S matrix to accommodate batch_size
         tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
         W = torch.ones(batch_size, self.n_structures) # currently weight all structurs same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
@@ -337,14 +295,15 @@ class MatchNet(nn.Module):
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
-        '''
+        """
         INPUT
         ------
         X: All internal bids [batch_size * n_hos, n_types]
         batch_size: number of samples in batch
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
-        '''
+        """
+        
         tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
         W = torch.ones(batch_size, self.int_structures)
         B = X.view(batch_size, self.n_types)
@@ -354,7 +313,7 @@ class MatchNet(nn.Module):
         return x_int_out
         
     def forward(self, X, batch_size):
-        '''
+        """
         Feed-forward output of network
 
         INPUT
@@ -364,14 +323,14 @@ class MatchNet(nn.Module):
         OUTPUT
         ------
         x_1: allocation vector [batch_size, n_structures]
-        '''
+        """
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
 
         x_1 = self.linear_program_forward(X, z, batch_size)
         return x_1
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
-        ''' 
+        """ 
         Tiles and combines curr misreport and true rep to create output tensor
         where only one hospital is misreporting at a time
 
@@ -385,14 +344,14 @@ class MatchNet(nn.Module):
         ------
         combined: dim [n_hos, batch_size, n_hos, n_type]
 
-        '''
+        """
         only_mis = curr_mis.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * self_mask
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
         result = only_mis + other_hos
         return result
 
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
-        '''
+        """
         Takes misreport allocation and computes utility
         
         INPUT
@@ -407,14 +366,14 @@ class MatchNet(nn.Module):
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility from misreporting in sample 0
-        '''
+        """
         batch_size = int(mis_alloc.size()[0] / self.n_hos)
-        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0, 1) # [n_hos, batch_size, n_hos * n_types]
+        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0, 1)  # [n_hos, batch_size, n_hos * n_types]
         
         # multiply by mask to only count misreport util
-        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask # [n_hos, batch_size, n_hos]
+        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask  # [n_hos, batch_size, n_hos]
         central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
-        central_util = central_util.transpose(0, 1) # [batch_size, n_hos]
+        central_util = central_util.transpose(0, 1)  # [batch_size, n_hos]
 
         # TODO possibly replace later if slow
         utils = []
@@ -431,16 +390,15 @@ class MatchNet(nn.Module):
                     print(abs(minquantity))
                     assert (abs(minquantity) < 1e-3)
 
-
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
             curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
-            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1) # [batch_size, n_types]
+            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_types]
             utils.append(torch.sum(counts, dim=1))
-        internal_util = torch.stack(utils, dim=1) # [batch_size, n_hos]
-        return central_util + internal_util # sum utility from central mechanism and internal matching
+        internal_util = torch.stack(utils, dim=1)  # [batch_size, n_hos]
+        return central_util + internal_util  # sum utility from central mechanism and internal matching
 
-    def calc_util(self, alloc_vec, S, n_hos, n_types):
-        '''
+    def calc_util(self, alloc_vec, S):
+        """
         Takes truthful allocation and computes utility
         
         INPUT
@@ -451,7 +409,7 @@ class MatchNet(nn.Module):
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
-        '''
+        """
 
         allocation = alloc_vec @ torch.transpose(S, 0, 1) # [batch_size, n_hos * n_types]
 
@@ -459,7 +417,7 @@ class MatchNet(nn.Module):
 
 
 def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
-    '''
+    """
     Inner optimization to find best misreports
 
     INPUT
@@ -475,7 +433,7 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
     OUTPUT
     -------
     curr_mis: current best misreport for each hospital when others report truthfully [batch_size, n_hos, n_types]
-    '''
+    """
     # not convinced this method is totally correct but sketches out what we want to do
     for i in range(iterations):
         # tile current best misreports into valid inputs
@@ -487,7 +445,7 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask) # FIX inputs
+        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)  # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
@@ -539,7 +497,7 @@ def greedy_experiment():
 
     output = model.forward(mis_input, batch_size * model.n_hos)
     mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-    util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+    util = model.calc_util(model.forward(p, batch_size), single_s)
 
     mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
@@ -595,7 +553,7 @@ def basic_matchnet_experiment():
 
         output = model.forward(mis_input, batch_size * model.n_hos)
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+        util = model.calc_util(model.forward(p, batch_size), single_s)
 
         mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
@@ -629,7 +587,7 @@ def two_two_experiment():
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
 
-    generator = create_simple_generator(lower_lst, upper_lst, 2, 2)
+    generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -684,7 +642,7 @@ def two_two_experiment():
 
         output = model.forward(mis_input, batch_size * model.n_hos)
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+        util = model.calc_util(model.forward(p, batch_size), single_s)
 
         mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
