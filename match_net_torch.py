@@ -595,16 +595,6 @@ def two_two_experiment():
     int_structues = 1
     batch_size = 10
 
-    # MASKS
-    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-
-    main_iter = 50  # number of training iterations
-
-    # Large compatibility matrix [n_hos_pair_combos, n_structures]
     single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0],
                              [1.0, 0.0, 1.0, 0.0],
                              [0.0, 0.0, 1.0, 1.0],
@@ -614,21 +604,34 @@ def two_two_experiment():
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
 
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, single_s, internal_s)
+    final_p, rgt_loss_lst, tot_loss_lst = train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP)
+
+    print(tot_loss_lst)
+    print(rgt_loss_lst)
+
+    # Actually look at the allocations to see if they make sense
+    print((model.forward(final_p, batch_size) @ single_s.transpose(0, 1)).view(10, 2, 2))
+    print(final_p)
+
+
+def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP ):
+    # MASKS
+    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+    main_iter = 50  # number of training iterations
+    # Large compatibility matrix [n_hos_pair_combos, n_structures]
     # regret quadratic term weight
     rho = 1.0
-
     # true input by batch dim [batch size, n_hos, n_types]
     # p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
-
     # initializing lagrange multipliers to 1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
-
     # Making model
-    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, single_s, internal_s)
-
     model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
     lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
-
     tot_loss_lst = []
     rgt_loss_lst = []
     # Training loop
@@ -668,17 +671,10 @@ def two_two_experiment():
         model_optim.zero_grad()
         total_loss.backward()
         model_optim.step()
-
-    print(tot_loss_lst)
-    print(rgt_loss_lst)
-
-    # Actually look at the allocations to see if they make sense
-    print((model.forward(p, batch_size) @ single_s.transpose(0, 1)).view(10, 2, 2))
-    print(p)
-
+    return p, rgt_loss_lst, tot_loss_lst
 
 
 # parameters
 if __name__ == '__main__':
     greedy_experiment()
-    basic_matchnet_experiment()
+    two_two_experiment()
