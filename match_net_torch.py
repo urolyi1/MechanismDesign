@@ -142,22 +142,6 @@ class MatchNet(nn.Module):
         result = only_mis + other_hos
         return result
 
-    def calc_internal_util(self, p, mis_x):
-        '''
-        Calculate internal utility
-
-        INPUT
-        ------
-        curr_mis: [batch_size, n_hos, n_types]
-        og: [batch_size, n_hos, n_types]
-
-        OUTPUT
-        ------
-        internal_util: the utility from the internal matching for each hospital [batch_size, n_hos]
-        '''
-        raise NotImplementedError
-        
-
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         '''
         Takes misreport allocation and computes utility
