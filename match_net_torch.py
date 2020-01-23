@@ -4,50 +4,8 @@ import torch.optim as optim
 import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
+import HospitalGenerators as gens
 import diffcp
-
-class SingleHospital:
-    def __init__(self, n_types, dist_lst):
-        ''' Takes in number of pair types along with a list of functions that
-        generate the number of people in that hospital with pair type.
-        '''
-        self.n_types = n_types
-        self.dists = dist_lst
-    def generate(self, batch_size):
-        '''generate a report from this hospital'''
-        X = np.zeros((batch_size, self.n_types))
-        for i, dist in enumerate(self.dists):
-            X[:, i] = dist(size=batch_size)
-        return X
-
-
-class ReportGenerator:
-    def __init__(self, hos_lst, single_report_shape):
-        self.hospitals = hos_lst
-        self.single_shape = single_report_shape
-
-    def generate_report(self, batch_size):
-        X = np.zeros((batch_size,) + self.single_shape)
-        for i, hos in enumerate(self.hospitals):
-            X[:, i, :] = hos.generate(batch_size)
-        yield X
-
-
-def randint(low, high):
-    return lambda size: np.random.randint(low, high, size)
-
-
-def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
-    ''' Creates a generator object to create batches'''
-    hos_lst = []
-    for h in range(n_hos):
-        tmp_dist_lst = []
-        for t in range(n_types):
-            tmp_dist_lst.append(randint(low_lst_lst[h][t], high_lst_lst[h][t]))
-        hos_lst.append(SingleHospital(n_types, tmp_dist_lst))
-    gen = ReportGenerator(hos_lst, (n_hos, n_types))
-    return gen
-
 
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
@@ -219,7 +177,7 @@ class GreedyMatcher(nn.Module):
         internal_util = torch.stack(utils, dim=1)  # [batch_size, n_hos]
         return central_util + internal_util  # sum utility from central mechanism and internal matching
 
-    def calc_util(self, alloc_vec, S, n_hos, n_types):
+    def calc_util(self, alloc_vec, S):
         '''
         Takes truthful allocation and computes utility
 
@@ -422,7 +380,7 @@ class MatchNet(nn.Module):
         internal_util = torch.stack(utils, dim=1) # [batch_size, n_hos]
         return central_util + internal_util # sum utility from central mechanism and internal matching
 
-    def calc_util(self, alloc_vec, S, n_hos, n_types):
+    def calc_util(self, alloc_vec, S):
         '''
         Takes truthful allocation and computes utility
         
@@ -522,7 +480,7 @@ def greedy_experiment():
 
     output = model.forward(mis_input, batch_size * model.n_hos)
     mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-    util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+    util = model.calc_util(model.forward(p, batch_size), single_s)
 
     mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
@@ -578,7 +536,7 @@ def basic_matchnet_experiment():
 
         output = model.forward(mis_input, batch_size * model.n_hos)
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+        util = model.calc_util(model.forward(p, batch_size), single_s)
 
         mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
@@ -612,7 +570,7 @@ def two_two_experiment():
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
 
-    generator = create_simple_generator(lower_lst, upper_lst, 2, 2)
+    generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -667,7 +625,7 @@ def two_two_experiment():
 
         output = model.forward(mis_input, batch_size * model.n_hos)
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+        util = model.calc_util(model.forward(p, batch_size), single_s)
 
         mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
