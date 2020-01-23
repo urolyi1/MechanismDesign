@@ -439,6 +439,57 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
 
+def greedy_experiment():
+    print('estimating regret for greedy match...')
+    N_HOS = 2
+    N_TYP = 3
+    num_structures = 8
+    batch_size = 10
+    # MASKS
+    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+    main_iter = 30  # number of training iterations
+    # Large compatibility matrix [n_hos_pair_combos, n_structures]
+    single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+                             [1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+                             [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+                             [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                             [0.0, 0.0, 1.0, 0.0, 1.0, 0.0]], requires_grad=False).t()
+    # Internal compatbility matrix [n_types, n_int_structures]
+    internal_s = torch.tensor([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0]], requires_grad=False).t()
+    # regret quadratic term weight
+    # true input by batch dim [batch size, n_hos, n_types]
+    p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
+    # initializing lagrange multipliers to 1
+    # Making model
+    model = GreedyMatcher(N_HOS, N_TYP, num_structures, 2, single_s, internal_s)
+    tot_loss_lst = []
+    rgt_loss_lst = []
+    # Training loop
+    curr_mis = p.clone().detach().requires_grad_(True)
+
+    curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=5)
+
+    mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+
+    output = model.forward(mis_input, batch_size * model.n_hos)
+    mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+    util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+
+    mis_diff = (mis_util - util)  # [batch_size, n_hos]
+
+    rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+    # computes losses
+    print('mean regret', torch.mean(rgt).item())
+    print('mean util', torch.mean(torch.sum(util, dim=1)).item())
+
+
 
 def basic_matchnet_experiment():
     N_HOS = 2
@@ -517,4 +568,5 @@ def basic_matchnet_experiment():
 
 # parameters
 if __name__ == '__main__':
+    greedy_experiment()
     basic_matchnet_experiment()
