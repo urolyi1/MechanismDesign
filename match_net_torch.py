@@ -615,23 +615,22 @@ def two_two_experiment():
     print(final_p)
 
 
-def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP ):
+def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1e-1, main_iter=50, misreport_iter=50, misreport_lr=1.0, rho=1.0 ):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
     mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-    main_iter = 50  # number of training iterations
+
     # Large compatibility matrix [n_hos_pair_combos, n_structures]
     # regret quadratic term weight
-    rho = 1.0
     # true input by batch dim [batch size, n_hos, n_types]
     # p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
     # initializing lagrange multipliers to 1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
     # Making model
-    model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
-    lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+    lagr_optim = optim.Adam(params=[lagr_mults], lr=lagr_lr)
     tot_loss_lst = []
     rgt_loss_lst = []
     # Training loop
@@ -639,7 +638,7 @@ def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP ):
         p = torch.tensor(next(generator.generate_report(10))).float()
         curr_mis = p.clone().detach().requires_grad_(True)
 
-        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=50, lr=1.0)
+        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
         mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
@@ -676,5 +675,4 @@ def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP ):
 
 # parameters
 if __name__ == '__main__':
-    greedy_experiment()
     two_two_experiment()
