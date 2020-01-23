@@ -49,8 +49,8 @@ class MatchNet(nn.Module):
 
         self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
 
-        self.neural_net = nn.Sequential(nn.Linear(6, 20), nn.Tanh(), nn.Linear(20, 20),
-                                        nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, 8))
+        self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 20), nn.Tanh(), nn.Linear(20, 20),
+                                        nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, self.n_structures))
 
     def neural_net_forward(self, X):
         '''
@@ -267,8 +267,8 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
     return curr_mis.detach()
 
 # parameters
-N_HOS = 2
-N_TYP = 3
+N_HOS = 3
+N_TYP = 2
 num_structures = 8
 batch_size = 10
 
