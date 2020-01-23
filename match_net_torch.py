@@ -1,3 +1,5 @@
+import pickle
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -6,6 +8,7 @@ import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 import HospitalGenerators as gens
 import diffcp
+import time
 
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
@@ -258,6 +261,50 @@ class MatchNet(nn.Module):
             self.internalW = internalW
         else:
             self.internalW = torch.ones(self.int_structures)
+
+    def save(self, filename_prefix=None):
+        if filename_prefix is None:
+            filename_prefix = f'matchnet_{time.time()}'
+
+        torch.save(self.neural_net.state_dict(), filename_prefix + '.pytorch')
+
+    #n_hos, n_types, num_structs, int_structs, S, int_S, W = None, internalW = None):
+        params_dict = {
+            'n_hos': self.n_hos,
+            'n_types': self.n_types,
+            'n_structures': self.n_structures,
+            'int_structs': self.int_structures,
+            'S': self.S,
+            'int_S': self.int_S,
+            'W': self.W,
+            'internalW': self.internalW
+        }
+
+        with open(filename_prefix+'_classvariables.pickle', 'wb') as f:
+            pickle.dump(params_dict, f)
+
+    @staticmethod
+    def load(filename_prefix):
+        with open(filename_prefix + '_classvariables.pickle', 'rb') as f:
+            params_dict = pickle.load(f)
+
+        result = MatchNet(
+            params_dict['n_hos'],
+            params_dict['n_types'],
+            params_dict['n_structures'],
+            params_dict['int_structs'],
+            params_dict['S'],
+            params_dict['int_S'],
+            W= params_dict['W'],
+            internalW=params_dict['internalW']
+        )
+
+        result.neural_net.load_state_dict(torch.load(filename_prefix+'.pytorch'))
+
+        return result
+
+
+
 
     def neural_net_forward(self, X):
         """
@@ -613,6 +660,7 @@ def two_two_experiment():
     # Actually look at the allocations to see if they make sense
     print((model.forward(final_p, batch_size) @ single_s.transpose(0, 1)).view(10, 2, 2))
     print(final_p)
+    model.save(filename_prefix='test')
 
 
 def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1e-1, main_iter=50, misreport_iter=50, misreport_lr=1.0, rho=1.0 ):
