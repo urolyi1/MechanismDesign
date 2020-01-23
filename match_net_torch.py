@@ -52,7 +52,7 @@ def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
 
-    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S):
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None):
 
         super(GreedyMatcher, self).__init__()
         self.n_hos = n_hos
@@ -93,6 +93,15 @@ class GreedyMatcher(nn.Module):
 
         self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
 
+        if W is not None:
+            self.W = W
+        else:
+            self.W = torch.ones(self.n_structures)
+        if internalW is not None:
+            self.internalW = internalW
+        else:
+            self.internalW = torch.ones(self.int_structures)
+
 
     def linear_program_forward(self, X, batch_size):
         '''
@@ -109,7 +118,7 @@ class GreedyMatcher(nn.Module):
 
         # tile S matrix to accomodate batch_size
         tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
-        W = torch.ones(batch_size, self.n_structures)  # currently weight all structurs same
+        W = self.W.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_hos * self.n_types)  # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
@@ -126,7 +135,7 @@ class GreedyMatcher(nn.Module):
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         '''
         tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
-        W = torch.ones(batch_size, self.int_structures)
+        W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
 
         x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000})
@@ -240,7 +249,7 @@ class GreedyMatcher(nn.Module):
 
 class MatchNet(nn.Module):
 
-    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S):
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None):
         
         super(MatchNet, self).__init__()
         self.n_hos = n_hos
@@ -283,6 +292,14 @@ class MatchNet(nn.Module):
 
         self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 20), nn.Tanh(), nn.Linear(20, 20),
                                         nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, self.n_structures))
+        if W is not None:
+            self.W = W
+        else:
+            self.W = torch.ones(self.n_structures)
+        if internalW is not None:
+            self.internalW = internalW
+        else:
+            self.internalW = torch.ones(self.int_structures)
 
     def neural_net_forward(self, X):
         '''
