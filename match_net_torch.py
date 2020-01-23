@@ -6,6 +6,49 @@ import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 import diffcp
 
+class SingleHospital:
+    def __init__(self, n_types, dist_lst):
+        ''' Takes in number of pair types along with a list of functions that
+        generate the number of people in that hospital with pair type.
+        '''
+        self.n_types = n_types
+        self.dists = dist_lst
+    def generate(self, batch_size):
+        '''generate a report from this hospital'''
+        X = np.zeros((batch_size, self.n_types))
+        for i, dist in enumerate(self.dists):
+            X[:, i] = dist(size=batch_size)
+        return X
+
+
+class ReportGenerator:
+    def __init__(self, hos_lst, single_report_shape):
+        self.hospitals = hos_lst
+        self.single_shape = single_report_shape
+
+    def generate_report(self, batch_size):
+        X = np.zeros((batch_size,) + self.single_shape)
+        for i, hos in enumerate(self.hospitals):
+            X[:, i, :] = hos.generate(batch_size)
+        yield X
+
+
+def randint(low, high):
+    return lambda size: np.random.randint(low, high, size)
+
+
+def create_simple_generator(low_lst_lst, high_lst_lst, n_hos, n_types):
+    ''' Creates a generator object to create batches'''
+    hos_lst = []
+    for h in range(n_hos):
+        tmp_dist_lst = []
+        for t in range(n_types):
+            tmp_dist_lst.append(randint(low_lst_lst[h][t], high_lst_lst[h][t]))
+        hos_lst.append(SingleHospital(n_types, tmp_dist_lst))
+    gen = ReportGenerator(hos_lst, (n_hos, n_types))
+    return gen
+
+
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
 
@@ -438,6 +481,7 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
         curr_mis.requires_grad_(True)
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
+
 def greedy_experiment():
     print('estimating regret for greedy match...')
     N_HOS = 2
@@ -563,6 +607,100 @@ def basic_matchnet_experiment():
         model_optim.step()
     print(tot_loss_lst)
     print(rgt_loss_lst)
+
+def two_two_experiment():
+    lower_lst = [[10, 20], [30, 60]]
+    upper_lst = [[20, 40], [50, 100]]
+
+    generator = create_simple_generator(lower_lst, upper_lst, 2, 2)
+    # parameters
+    N_HOS = 2
+    N_TYP = 2
+    num_structures = 4
+    int_structues = 1
+    batch_size = 10
+
+    # MASKS
+    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+
+    main_iter = 50  # number of training iterations
+
+    # Large compatibility matrix [n_hos_pair_combos, n_structures]
+    single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0],
+                             [1.0, 0.0, 1.0, 0.0],
+                             [0.0, 0.0, 1.0, 1.0],
+                             [0.0, 1.0, 0.0, 1.0]], requires_grad=False)
+
+    # Internal compatbility matrix [n_types, n_int_structures]
+    internal_s = torch.tensor([[1.0],
+                               [1.0]], requires_grad=False)
+
+    # regret quadratic term weight
+    rho = 1.0
+
+    # true input by batch dim [batch size, n_hos, n_types]
+    # p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
+
+    # initializing lagrange multipliers to 1
+    lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
+
+    # Making model
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, single_s, internal_s)
+
+    model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
+    lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
+
+    tot_loss_lst = []
+    rgt_loss_lst = []
+    # Training loop
+    for c in range(main_iter):
+        p = torch.tensor(next(generator.generate_report(10))).float()
+        curr_mis = p.clone().detach().requires_grad_(True)
+
+        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=50, lr=1.0)
+
+        mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+
+        output = model.forward(mis_input, batch_size * model.n_hos)
+        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+        util = model.calc_util(model.forward(p, batch_size), single_s, N_HOS, N_TYP)
+
+        mis_diff = (mis_util - util)  # [batch_size, n_hos]
+
+        rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+        # computes losses
+        rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
+        lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
+        total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+
+        tot_loss_lst.append(total_loss.item())
+        rgt_loss_lst.append(rgt_loss.item())
+
+        print('total loss', total_loss.item())
+        print('rgt_loss', rgt_loss.item())
+        print('lagr_loss', lagr_loss.item())
+
+        if c % 5 == 0:
+            lagr_optim.zero_grad()
+            (-lagr_loss).backward(retain_graph=True)
+            lagr_optim.step()
+
+        model_optim.zero_grad()
+        total_loss.backward()
+        model_optim.step()
+
+    print(tot_loss_lst)
+    print(rgt_loss_lst)
+
+    # Actually look at the allocations to see if they make sense
+    print((model.forward(p, batch_size) @ single_s.transpose(0, 1)).view(10, 2, 2))
+    print(p)
+
 
 
 # parameters
