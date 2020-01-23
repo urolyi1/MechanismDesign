@@ -11,7 +11,7 @@ class GreedyMatcher(nn.Module):
 
     def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S):
 
-        super(MatchNet, self).__init__()
+        super(GreedyMatcher, self).__init__()
         self.n_hos = n_hos
         self.n_types = n_types
 
@@ -126,21 +126,6 @@ class GreedyMatcher(nn.Module):
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
         result = only_mis + other_hos
         return result
-
-    def calc_internal_util(self, p, mis_x):
-        '''
-        Calculate internal utility
-
-        INPUT
-        ------
-        curr_mis: [batch_size, n_hos, n_types]
-        og: [batch_size, n_hos, n_types]
-
-        OUTPUT
-        ------
-        internal_util: the utility from the internal matching for each hospital [batch_size, n_hos]
-        '''
-        raise NotImplementedError
 
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         '''
