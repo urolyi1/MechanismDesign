@@ -595,6 +595,10 @@ def convert_internal_S(internal_S, num_hospitals):
     return np.concatenate(all_cols, axis=1)
 
 
+def internal_central_bloodtypes(num_hospitals):
+    internal_s = np.load('bloodtypematrix.npy')
+    central_s = convert_internal_S(internal_s, num_hospitals)
+    return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
 def two_two_experiment():
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
