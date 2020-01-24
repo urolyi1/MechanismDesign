@@ -252,8 +252,8 @@ class MatchNet(nn.Module):
 
         self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
 
-        self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 20), nn.Tanh(), nn.Linear(20, 20),
-                                        nn.Tanh(), nn.Linear(20, 20), nn.Tanh(), nn.Linear(20, self.n_structures))
+        self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 128), nn.Tanh(), nn.Linear(128, 128),
+                                        nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_structures))
         if W is not None:
             self.W = W
         else:
@@ -567,7 +567,6 @@ def create_train_sample(generator, num_batches, batch_size=16):
         batches.append(torch.tensor(next(generator.generate_report(batch_size))).float())
     return torch.stack(batches, dim=0)
 
-
 def two_two_experiment():
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
@@ -600,7 +599,6 @@ def two_two_experiment():
     print((model.forward(final_p[0], batch_size) @ single_s.transpose(0, 1)).view(batch_size, 2, 2))
     print(final_p[0])
     model.save(filename_prefix='test')
-
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=1.0):
