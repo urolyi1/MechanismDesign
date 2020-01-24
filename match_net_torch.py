@@ -8,6 +8,7 @@ import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 import HospitalGenerators as gens
 import diffcp
+from tqdm import tqdm as tqdm
 import time
 
 class GreedyMatcher(nn.Module):
@@ -555,92 +556,30 @@ def greedy_experiment():
     print('mean util', torch.mean(torch.sum(util, dim=1)).item())
 
 
+def create_train_sample(generator, num_batches, batch_size=16):
+    """
+    :param generator:
+    :param num_batches:
+    :return:
+    """
+    batches = []
+    for i in range(num_batches):
+        batches.append(torch.tensor(next(generator.generate_report(batch_size))).float())
+    return torch.stack(batches, dim=0)
 
-def basic_matchnet_experiment():
-    N_HOS = 2
-    N_TYP = 3
-    num_structures = 8
-    batch_size = 10
-    # MASKS
-    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-    main_iter = 30  # number of training iterations
-    # Large compatibility matrix [n_hos_pair_combos, n_structures]
-    single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
-                             [1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
-                             [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
-                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
-                             [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                             [0.0, 0.0, 1.0, 0.0, 1.0, 0.0]], requires_grad=False).t()
-    # Internal compatbility matrix [n_types, n_int_structures]
-    internal_s = torch.tensor([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0]], requires_grad=False).t()
-    # regret quadratic term weight
-    rho = 1.0 # TODO: TUNE
-    # true input by batch dim [batch size, n_hos, n_types]
-    p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
-    # initializing lagrange multipliers to 1
-    lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
-    # Making model
-    model = MatchNet(N_HOS, N_TYP, num_structures, 2, single_s, internal_s)
-    model_optim = optim.Adam(params=model.parameters(), lr=1e-1)
-    lagr_optim = optim.Adam(params=[lagr_mults], lr=1e-2)
-    tot_loss_lst = []
-    rgt_loss_lst = []
-    # Training loop
-    for c in range(main_iter):
-        curr_mis = p.clone().detach().requires_grad_(True)
-
-        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=5)
-
-        mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
-
-        output = model.forward(mis_input, batch_size * model.n_hos)
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s)
-
-        mis_diff = (mis_util - util)  # [batch_size, n_hos]
-
-        rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
-
-        # computes losses
-        rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
-        lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
-        total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
-
-        tot_loss_lst.append(total_loss.item())
-        rgt_loss_lst.append(rgt_loss.item())
-
-        print('total loss', total_loss.item())
-        print('rgt_loss', rgt_loss.item())
-        print('mean regret', torch.mean(rgt).item())
-        print('lagr_loss', lagr_loss.item())
-
-        if c % 5 == 0:
-            lagr_optim.zero_grad()
-            (-lagr_loss).backward(retain_graph=True)
-            lagr_optim.step()
-
-        model_optim.zero_grad()
-        total_loss.backward()
-        model_optim.step()
-    print(tot_loss_lst)
-    print(rgt_loss_lst)
 
 def two_two_experiment():
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
 
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
+    batches = create_train_sample(generator, 3, batch_size=16)
     # parameters
     N_HOS = 2
     N_TYP = 2
     num_structures = 4
     int_structues = 1
-    batch_size = 10
+    batch_size = batches.shape[1]
 
     single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0],
                              [1.0, 0.0, 1.0, 0.0],
@@ -652,29 +591,18 @@ def two_two_experiment():
                                [1.0]], requires_grad=False)
 
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, single_s, internal_s)
-    final_p, rgt_loss_lst, tot_loss_lst = train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP)
+    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, single_s, N_HOS, N_TYP, main_iter=2)
 
     print(tot_loss_lst)
     print(rgt_loss_lst)
 
     # Actually look at the allocations to see if they make sense
-    print((model.forward(final_p, batch_size) @ single_s.transpose(0, 1)).view(10, 2, 2))
-    print(final_p)
+    print((model.forward(final_p[0], batch_size) @ single_s.transpose(0, 1)).view(batch_size, 2, 2))
+    print(final_p[0])
     model.save(filename_prefix='test')
 
-def create_train_sample(generator, num_batches):
-    """
-    :param generator:
-    :param num_batches:
-    :return:
-    """
-    batches = []
-    for i in range(num_batches):
-        batches.append(torch.tensor(next(generator.generate_report(10))).float())
-    return torch.stack(batches, dim=0)
 
-
-def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
+def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=1.0):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
@@ -694,43 +622,50 @@ def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1
     tot_loss_lst = []
     rgt_loss_lst = []
     # Training loop
-    for c in range(main_iter):
-        p = torch.tensor(next(generator.generate_report(10))).float()
-        curr_mis = p.clone().detach().requires_grad_(True)
+    all_misreports = train_batches.clone().detach()
+    for i in range(main_iter):
+        for c in tqdm(range(train_batches.shape[0])):
+            p = train_batches[c,:,:,:]
+            curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
 
-        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
+            curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
-        mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+            mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
-        output = model.forward(mis_input, batch_size * model.n_hos)
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-        util = model.calc_util(model.forward(p, batch_size), single_s)
+            output = model.forward(mis_input, batch_size * model.n_hos)
+            mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+            util = model.calc_util(model.forward(p, batch_size), single_s)
 
-        mis_diff = (mis_util - util)  # [batch_size, n_hos]
+            mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
-        rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+            rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
-        # computes losses
-        rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
-        lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
-        total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+            # computes losses
+            rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
+            lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
+            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
 
-        tot_loss_lst.append(total_loss.item())
-        rgt_loss_lst.append(rgt_loss.item())
+            tot_loss_lst.append(total_loss.item())
+            rgt_loss_lst.append(rgt_loss.item())
 
-        print('total loss', total_loss.item())
-        print('rgt_loss', rgt_loss.item())
-        print('lagr_loss', lagr_loss.item())
+            print('total loss', total_loss.item())
+            print('rgt_loss', rgt_loss.item())
+            print('lagr_loss', lagr_loss.item())
 
-        if c % 5 == 0:
-            lagr_optim.zero_grad()
-            (-lagr_loss).backward(retain_graph=True)
-            lagr_optim.step()
+            if c % 5 == 0:
+                lagr_optim.zero_grad()
+                (-lagr_loss).backward(retain_graph=True)
+                lagr_optim.step()
 
-        model_optim.zero_grad()
-        total_loss.backward()
-        model_optim.step()
-    return p, rgt_loss_lst, tot_loss_lst
+            model_optim.zero_grad()
+            total_loss.backward()
+            model_optim.step()
+            with torch.no_grad():
+                all_misreports[c,:,:,:] = curr_mis
+            all_misreports.requires_grad_(True)
+
+    print(all_misreports)
+    return train_batches, rgt_loss_lst, tot_loss_lst
 
 
 # parameters
