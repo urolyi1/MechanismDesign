@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import cvxpy as cp
+import argparse
 from cvxpylayers.torch import CvxpyLayer
 import HospitalGenerators as gens
 import diffcp
@@ -599,12 +600,12 @@ def internal_central_bloodtypes(num_hospitals):
     internal_s = np.load('bloodtypematrix.npy')
     central_s = convert_internal_S(internal_s, num_hospitals)
     return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
-def two_two_experiment():
+def two_two_experiment(args):
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
 
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
-    batches = create_train_sample(generator, 3, batch_size=16)
+    batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -618,7 +619,11 @@ def two_two_experiment():
     # Internal compatbility matrix [n_types, n_int_structures]
 
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, central_s, internal_s)
-    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, main_iter=2)
+    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                                                     main_iter=args.main_iter,
+                                                     net_lr=args.main_lr,
+                                                     misreport_iter=args.misreport_iter,
+                                                     misreport_lr=args.misreport_lr)
 
     print(tot_loss_lst)
     print(rgt_loss_lst)
@@ -630,7 +635,7 @@ def two_two_experiment():
 
 
 
-def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
+def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=1.0):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
@@ -695,7 +700,16 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     print(all_misreports)
     return train_batches, rgt_loss_lst, tot_loss_lst
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--main-lr', type=float, default=1e-3, help='main learning rate')
+parser.add_argument('--main-iter', type=int, default=25, help='number of outer iterations')
+parser.add_argument('--batchsize', type=int, default=16, help='batch size')
+parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
+parser.add_argument('--misreport-iter', type=int, default=50, help='number of misreport iterations')
+parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 
 # parameters
 if __name__ == '__main__':
-    two_two_experiment()
+    args = parser.parse_args()
+    two_two_experiment(args)
