@@ -569,40 +569,6 @@ def create_train_sample(generator, num_batches, batch_size=16):
     return torch.stack(batches, dim=0)
 
 
-def two_two_experiment():
-    lower_lst = [[10, 20], [30, 60]]
-    upper_lst = [[20, 40], [50, 100]]
-
-    generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
-    batches = create_train_sample(generator, 3, batch_size=16)
-    # parameters
-    N_HOS = 2
-    N_TYP = 2
-    num_structures = 4
-    int_structues = 1
-    batch_size = batches.shape[1]
-
-    single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0],
-                             [1.0, 0.0, 1.0, 0.0],
-                             [0.0, 0.0, 1.0, 1.0],
-                             [0.0, 1.0, 0.0, 1.0]], requires_grad=False)
-
-    # Internal compatbility matrix [n_types, n_int_structures]
-    internal_s = torch.tensor([[1.0],
-                               [1.0]], requires_grad=False)
-
-    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, single_s, internal_s)
-    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, single_s, N_HOS, N_TYP, main_iter=2)
-
-    print(tot_loss_lst)
-    print(rgt_loss_lst)
-
-    # Actually look at the allocations to see if they make sense
-    print((model.forward(final_p[0], batch_size) @ single_s.transpose(0, 1)).view(batch_size, 2, 2))
-    print(final_p[0])
-    model.save(filename_prefix='test')
-
-
 def blow_up_column(col_vector, num_hospitals):
     nonzero_inds,  = np.nonzero(col_vector)
     all_inds = []
@@ -620,6 +586,44 @@ def blow_up_column(col_vector, num_hospitals):
             new_column[(curr_ind_hospital * num_types) + ind] += 1.0
         new_columns.append(new_column)
     return np.stack(new_columns).transpose()
+
+
+def convert_internal_S(internal_S, num_hospitals):
+    all_cols = []
+    for col in range(internal_S.shape[1]):
+        all_cols.append(blow_up_column(internal_S[:,col], num_hospitals))
+    return np.concatenate(all_cols, axis=1)
+
+
+def two_two_experiment():
+    lower_lst = [[10, 20], [30, 60]]
+    upper_lst = [[20, 40], [50, 100]]
+
+    generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
+    batches = create_train_sample(generator, 3, batch_size=16)
+    # parameters
+    N_HOS = 2
+    N_TYP = 2
+    num_structures = 4
+    int_structues = 1
+    batch_size = batches.shape[1]
+
+    internal_s = torch.tensor([[1.0],
+                               [1.0]], requires_grad=False)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
+    # Internal compatbility matrix [n_types, n_int_structures]
+
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, central_s, internal_s)
+    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, main_iter=2)
+
+    print(tot_loss_lst)
+    print(rgt_loss_lst)
+
+    # Actually look at the allocations to see if they make sense
+    print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
+    print(final_p[0])
+    model.save(filename_prefix='test')
+
 
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
