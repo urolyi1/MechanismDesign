@@ -295,7 +295,7 @@ class MatchNet(nn.Module):
             params_dict['int_structs'],
             params_dict['S'],
             params_dict['int_S'],
-            W= params_dict['W'],
+            W=params_dict['W'],
             internalW=params_dict['internalW']
         )
 
@@ -579,7 +579,7 @@ def basic_matchnet_experiment():
     # Internal compatbility matrix [n_types, n_int_structures]
     internal_s = torch.tensor([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0]], requires_grad=False).t()
     # regret quadratic term weight
-    rho = 1.0
+    rho = 1.0 # TODO: TUNE
     # true input by batch dim [batch size, n_hos, n_types]
     p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
     # initializing lagrange multipliers to 1
@@ -663,7 +663,7 @@ def two_two_experiment():
     model.save(filename_prefix='test')
 
 
-def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1e-1, main_iter=50, misreport_iter=50, misreport_lr=1.0, rho=1.0 ):
+def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50, misreport_iter=50, misreport_lr=1.0, rho=1.0 ):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
@@ -678,7 +678,7 @@ def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
     # Making model
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
-    lagr_optim = optim.Adam(params=[lagr_mults], lr=lagr_lr)
+    lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
     tot_loss_lst = []
     rgt_loss_lst = []
     # Training loop
