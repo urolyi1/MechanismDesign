@@ -604,20 +604,22 @@ def two_two_experiment():
 
 
 def blow_up_column(col_vector, num_hospitals):
-    # TODO self compatible things
     nonzero_inds,  = np.nonzero(col_vector)
+    all_inds = []
+    for ind in nonzero_inds:
+        count = int(col_vector[ind])
+        all_inds.extend( count*[ind])
     num_types = len(col_vector)
     all_hospitals = list(range(num_hospitals))
-    num_outcomes = len(nonzero_inds)
+    num_outcomes = len(all_inds)
     new_columns = []
     for hospital_outcome in itertools.product(all_hospitals, repeat=num_outcomes):
         new_column = np.zeros(num_types * num_hospitals)
-        for i, ind in enumerate(nonzero_inds):
+        for i, ind in enumerate(all_inds):
             curr_ind_hospital = hospital_outcome[i]
-            new_column[(curr_ind_hospital * num_types) + ind] = 1.0
+            new_column[(curr_ind_hospital * num_types) + ind] += 1.0
         new_columns.append(new_column)
     return np.stack(new_columns).transpose()
-
 
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
