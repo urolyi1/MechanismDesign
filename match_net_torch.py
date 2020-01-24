@@ -662,8 +662,20 @@ def two_two_experiment():
     print(final_p)
     model.save(filename_prefix='test')
 
+def create_train_sample(generator, num_batches):
+    """
+    :param generator:
+    :param num_batches:
+    :return:
+    """
+    batches = []
+    for i in range(num_batches):
+        batches.append(torch.tensor(next(generator.generate_report(10))).float())
+    return torch.stack(batches, dim=0)
 
-def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50, misreport_iter=50, misreport_lr=1.0, rho=1.0 ):
+
+def train_loop(generator, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
+               misreport_iter=50, misreport_lr=1.0, rho=1.0):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
