@@ -1,3 +1,4 @@
+import itertools
 import pickle
 
 import torch
@@ -600,6 +601,23 @@ def two_two_experiment():
     print((model.forward(final_p[0], batch_size) @ single_s.transpose(0, 1)).view(batch_size, 2, 2))
     print(final_p[0])
     model.save(filename_prefix='test')
+
+
+def blow_up_column(col_vector, num_hospitals):
+    # TODO self compatible things
+    nonzero_inds,  = np.nonzero(col_vector)
+    num_types = len(col_vector)
+    all_hospitals = list(range(num_hospitals))
+    num_outcomes = len(nonzero_inds)
+    new_columns = []
+    for hospital_outcome in itertools.product(all_hospitals, repeat=num_outcomes):
+        new_column = np.zeros(num_types * num_hospitals)
+        for i, ind in enumerate(nonzero_inds):
+            curr_ind_hospital = hospital_outcome[i]
+            new_column[(curr_ind_hospital * num_types) + ind] = 1.0
+        new_columns.append(new_column)
+    return np.stack(new_columns).transpose()
+
 
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, lagr_lr=1.0, main_iter=50,
