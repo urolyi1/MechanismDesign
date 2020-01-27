@@ -476,13 +476,13 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=25, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=50, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
+parser.add_argument('--misreport-iter', type=int, default=10, help='number of misreport iterations')
+parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport learning rate')
 
 # parameters
 if __name__ == '__main__':
