@@ -655,7 +655,7 @@ def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP,
 
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
-               misreport_iter=50, misreport_lr=1.0, rho=1.0):
+               misreport_iter=50, misreport_lr=1.0, rho=10.0):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
@@ -703,6 +703,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             print('total loss', total_loss.item())
             print('rgt_loss', rgt_loss.item())
             print('lagr_loss', lagr_loss.item())
+            print('mean util', torch.mean(torch.sum(util, dim=1)))
 
             if i % 5 == 0:
                 lagr_optim.zero_grad()
