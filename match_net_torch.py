@@ -86,7 +86,7 @@ class GreedyMatcher(nn.Module):
         B = X.view(batch_size, self.n_hos * self.n_types)  # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, solver_args={'max_iters': 50000})
+        x1_out, = self.l_prog_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
@@ -102,7 +102,7 @@ class GreedyMatcher(nn.Module):
         W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000})
+        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
 
         return x_int_out
 
@@ -341,7 +341,7 @@ class MatchNet(nn.Module):
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, z, solver_args={'max_iters': 50000})
+        x1_out, = self.l_prog_layer(tiled_S, W, B, z, solver_args={'max_iters': 50000, 'verbose': False})
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
@@ -358,7 +358,7 @@ class MatchNet(nn.Module):
         W = torch.ones(batch_size, self.int_structures)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000})
+        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
 
         return x_int_out
         
@@ -495,7 +495,9 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
+
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)  # FIX inputs
+
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
