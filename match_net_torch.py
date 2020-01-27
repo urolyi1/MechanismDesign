@@ -376,7 +376,7 @@ def two_two_experiment(args):
     # Internal compatbility matrix [n_types, n_int_structures]
 
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
-    initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
+    #initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
     final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
                                                      net_lr=args.main_lr,
@@ -464,6 +464,14 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
+            if i % 10 == 0:
+                # TODO: ONLY WORKS FOR TWO TWO!!!!!
+                counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
+                internal_match = p.clone().detach()
+                internal_match[:, :, 1] = internal_match[:, :, 0]
+                print(counts)
+                print(counts - internal_match)
+
 
             model_optim.zero_grad()
             total_loss.backward()
