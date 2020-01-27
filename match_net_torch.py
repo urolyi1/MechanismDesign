@@ -621,6 +621,7 @@ def two_two_experiment(args):
     # Internal compatbility matrix [n_types, n_int_structures]
 
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, central_s, internal_s)
+    initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
     final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
                                                      net_lr=args.main_lr,
@@ -634,6 +635,22 @@ def two_two_experiment(args):
     print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     print(final_p[0])
     model.save(filename_prefix='test')
+
+
+
+def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, init_iter=50):
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+    for i in range(init_iter):
+        epoch_mean_loss = 0.0
+        for c in range(train_batches.shape[0]):
+            p = train_batches[c,:,:,:]
+            util = model.calc_util(model.forward(p, batch_size), single_s)
+            total_loss = -torch.mean(torch.sum(util, dim=1))
+            epoch_mean_loss += total_loss.item()
+            model_optim.zero_grad()
+            total_loss.backward()
+            model_optim.step()
+        print('mean loss', epoch_mean_loss / train_batches.shape[0])
 
 
 
@@ -706,6 +723,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=25, help='number of outer iterations')
+parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=50, help='number of misreport iterations')
