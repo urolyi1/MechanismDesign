@@ -430,6 +430,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     rgt_loss_lst = []
     # Training loop
     all_misreports = train_batches.clone().detach()
+    print(train_batches)
     for i in range(main_iter):
         for c in tqdm(range(train_batches.shape[0])):
             p = train_batches[c,:,:,:]
@@ -495,5 +496,7 @@ parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport l
 
 # parameters
 if __name__ == '__main__':
+    np.random.seed(0)
+    torch.manual_seed(0)
     args = parser.parse_args()
     two_two_experiment(args)
