@@ -229,26 +229,26 @@ class MatchNet(nn.Module):
         central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
         central_util = central_util.transpose(0, 1)  # [batch_size, n_hos]
 
-        # TODO possibly replace later if slow
-        utils = []
+        leftovers = []
         for i in range(self.n_hos):
-            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :]
-            minquantity = (torch.min(p[:,i,:] - allocated)).item()
+            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :] # [batch_size, n_types]
+            minquantity = (torch.min(p[:, i, :] - allocated)).item()
             if minquantity <= 0:
                 try:
-                    assert(abs(minquantity) < 1e-3)
+                    assert (abs(minquantity) < 1e-3)
                 except:
                     print(allocated)
                     print(p[:, i, :])
-                    print(p[:,i,:] - allocated)
+                    print(p[:, i, :] - allocated)
                     print(abs(minquantity))
                     assert (abs(minquantity) < 1e-3)
+            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
+            leftovers.append(curr_hos_leftovers)
+        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
+        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
+        counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
+        internal_util = torch.sum(counts, dim=-1)
 
-            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)
-            curr_hos_alloc = self.internal_linear_prog(curr_hos_leftovers, curr_hos_leftovers.shape[0])
-            counts = curr_hos_alloc @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_types]
-            utils.append(torch.sum(counts, dim=1))
-        internal_util = torch.stack(utils, dim=1)  # [batch_size, n_hos]
         return central_util + internal_util  # sum utility from central mechanism and internal matching
 
     def calc_util(self, alloc_vec, S):
@@ -356,6 +356,7 @@ def internal_central_bloodtypes(num_hospitals):
     internal_s = np.load('bloodtypematrix.npy')
     central_s = convert_internal_S(internal_s, num_hospitals)
     return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
+
 def two_two_experiment(args):
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
@@ -366,7 +367,7 @@ def two_two_experiment(args):
     N_HOS = 2
     N_TYP = 2
     num_structures = 4
-    int_structues = 1
+    int_structures = 1
     batch_size = batches.shape[1]
 
     internal_s = torch.tensor([[1.0],
@@ -374,7 +375,7 @@ def two_two_experiment(args):
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
     # Internal compatbility matrix [n_types, n_int_structures]
 
-    model = MatchNet(N_HOS, N_TYP, num_structures, int_structues, central_s, internal_s)
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
     initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
     final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
