@@ -487,5 +487,7 @@ parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport l
 
 # parameters
 if __name__ == '__main__':
+    np.random.seed(0)
+    torch.manual_seed(0)
     args = parser.parse_args()
     two_two_experiment(args)
