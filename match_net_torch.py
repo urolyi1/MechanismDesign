@@ -430,6 +430,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     rgt_loss_lst = []
     # Training loop
     all_misreports = train_batches.clone().detach()
+    print(train_batches)
     for i in range(main_iter):
         for c in tqdm(range(train_batches.shape[0])):
             p = train_batches[c,:,:,:]
