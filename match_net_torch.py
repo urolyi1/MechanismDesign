@@ -687,7 +687,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             print('rgt_loss', rgt_loss.item())
             print('lagr_loss', lagr_loss.item())
 
-            if c % 5 == 0:
+            if i % 5 == 0:
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
