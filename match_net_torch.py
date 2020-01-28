@@ -391,7 +391,7 @@ def two_two_experiment(args):
     print(final_p[0])
     prefix = f'test{time.time()}'
     model.save(filename_prefix=prefix)
-    torch.save(prefix+'_batch.pytorch', batches)
+    torch.save(batches, prefix+'_batch.pytorch')
 
 
 
@@ -461,6 +461,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
 
             print('total loss', total_loss.item())
             print('rgt_loss', rgt_loss.item())
+            print('non-quadratic regret', rgt)
             print('lagr_loss', lagr_loss.item())
             print('mean util', torch.mean(torch.sum(util, dim=1)))
 
