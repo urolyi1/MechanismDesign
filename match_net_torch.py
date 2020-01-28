@@ -38,7 +38,7 @@ class MatchNet(nn.Module):
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
-        self.control_strength = 10.0
+        self.control_strength = 100.0
     
         constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
@@ -460,12 +460,9 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
     mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
-    # Large compatibility matrix [n_hos_pair_combos, n_structures]
-    # regret quadratic term weight
-    # true input by batch dim [batch size, n_hos, n_types]
-    # p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
     # initializing lagrange multipliers to 1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
+    lagr_update_counter = 0
     # Making model
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
@@ -476,6 +473,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     print(train_batches)
     for i in range(main_iter):
         for c in tqdm(range(train_batches.shape[0])):
+            # true input by batch dim [batch size, n_hos, n_types]
             p = train_batches[c,:,:,:]
             curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
 
@@ -499,11 +497,11 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
 
-            if c % 5 == 0:
+            if lagr_update_counter % 5 == 0:
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
-
+            lagr_update_counter += 1
             model_optim.zero_grad()
             total_loss.backward()
             model_optim.step()
