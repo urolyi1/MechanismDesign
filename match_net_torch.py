@@ -396,7 +396,7 @@ def two_two_experiment(args):
 
 
 
-def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, init_iter=50):
+def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, init_iter=50):
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     for i in range(init_iter):
         epoch_mean_loss = 0.0
@@ -459,24 +459,10 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
 
-            print('total loss', total_loss.item())
-            print('rgt_loss', rgt_loss.item())
-            print('non-quadratic regret', rgt)
-            print('lagr_loss', lagr_loss.item())
-            print('mean util', torch.mean(torch.sum(util, dim=1)))
-
-            if i % 5 == 0:
+            if c % 5 == 0:
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
-            if i % 10 == 0:
-                # TODO: ONLY WORKS FOR TWO TWO!!!!!
-                counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
-                internal_match = p.clone().detach()
-                internal_match[:, :, 1] = internal_match[:, :, 0]
-                print(counts)
-                print(counts - internal_match)
-
 
             model_optim.zero_grad()
             total_loss.backward()
@@ -485,6 +471,18 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
                 all_misreports[c,:,:,:] = curr_mis
             all_misreports.requires_grad_(True)
 
+        if i % 5 == 0:
+            # TODO: ONLY WORKS FOR TWO TWO!!!!!
+            counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
+            internal_match = p.clone().detach()
+            internal_match[:, :, 1] = internal_match[:, :, 0]
+            print(counts)
+            print(counts - internal_match)
+        print('total loss', total_loss.item())
+        print('rgt_loss', rgt_loss.item())
+        print('non-quadratic regret', rgt)
+        print('lagr_loss', lagr_loss.item())
+        print('mean util', torch.mean(torch.sum(util, dim=1)))
     print(all_misreports)
     return train_batches, rgt_loss_lst, tot_loss_lst
 
@@ -494,8 +492,8 @@ parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning r
 parser.add_argument('--main-iter', type=int, default=25, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
-parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=10, help='number of misreport iterations')
+parser.add_argument('--nbatch', type=int, default=8, help='number of batches')
+parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport learning rate')
 
 # parameters
