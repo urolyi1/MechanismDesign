@@ -9,11 +9,13 @@ import cvxpy as cp
 import argparse
 from cvxpylayers.torch import CvxpyLayer
 import HospitalGenerators as gens
+from datetime import datetime
 import diffcp
 from tqdm import tqdm as tqdm
 import time
 
-
+def curr_timestamp():
+    return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H:%M:%S')
 
 class MatchNet(nn.Module):
 
@@ -71,7 +73,7 @@ class MatchNet(nn.Module):
 
     def save(self, filename_prefix=None):
         if filename_prefix is None:
-            filename_prefix = f'matchnet_{time.time()}'
+            filename_prefix = f'matchnet_{curr_timestamp()}'
 
         torch.save(self.neural_net.state_dict(), filename_prefix + '.pytorch')
 
@@ -389,12 +391,16 @@ def two_two_experiment(args):
     # Actually look at the allocations to see if they make sense
     print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     print(final_p[0])
-    prefix = f'test{time.time()}'
+    prefix = f'test{curr_timestamp()}'
     model.save(filename_prefix=prefix)
     torch.save(batches, prefix+'_batch.pytorch')
 
+    test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
-
+    final_train_regrets = test_model_performance(batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
+    test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
+    print('test batch regrets', test_regrets)
+    print('train batch regrets', final_train_regrets)
 
 def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, init_iter=50):
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
@@ -409,6 +415,40 @@ def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP,
             total_loss.backward()
             model_optim.step()
         print('mean loss', epoch_mean_loss / train_batches.shape[0])
+
+
+def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0):
+
+    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+
+    all_misreports = test_batches.clone().detach()
+    regrets = []
+    for c in range(test_batches.shape[0]):
+
+        p = test_batches[c, :, :, :]
+        curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
+
+        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
+                                       lr=misreport_lr)
+
+        with torch.no_grad():
+            mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+
+            output = model.forward(mis_input, batch_size * model.n_hos)
+            mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+            util = model.calc_util(model.forward(p, batch_size), single_s)
+
+            mis_diff = (mis_util - util)  # [batch_size, n_hos]
+
+            regrets.append(mis_diff.detach())
+            all_misreports[c, :, :, :] = curr_mis
+
+
+        all_misreports.requires_grad_(True)
+    return regrets
 
 
 
