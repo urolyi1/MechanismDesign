@@ -389,7 +389,10 @@ def two_two_experiment(args):
     # Actually look at the allocations to see if they make sense
     print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     print(final_p[0])
-    model.save(filename_prefix='test')
+    prefix = f'test{time.time()}'
+    model.save(filename_prefix=prefix)
+    torch.save(prefix+'_batch.pytorch', batches)
+
 
 
 
