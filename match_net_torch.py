@@ -387,7 +387,7 @@ def two_two_experiment(args):
 
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s, control_strength=args.control_strength)
     #initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
-    final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+    final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
                                                      net_lr=args.main_lr,
                                                      misreport_iter=args.misreport_iter,
@@ -395,6 +395,9 @@ def two_two_experiment(args):
 
     print(tot_loss_lst)
     print(rgt_loss_lst)
+    np.save(prefix+'util_loss.npy', util_loss_lst)
+    np.save(prefix+'rgt_loss.npy', rgt_loss_lst)
+    np.save(prefix+'tot_loss.npy', tot_loss_lst)
 
     # Actually look at the allocations to see if they make sense
     #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
@@ -474,11 +477,15 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     # Making model
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
-    tot_loss_lst = []
-    rgt_loss_lst = []
+    all_tot_loss_lst = []
+    all_rgt_loss_lst = []
+    all_util_loss_lst = []
     # Training loop
     all_misreports = train_batches.clone().detach()
     for i in range(main_iter):
+        tot_loss_lst = []
+        rgt_loss_lst = []
+        util_loss_lst = []
         for c in tqdm(range(train_batches.shape[0])):
             # true input by batch dim [batch size, n_hos, n_types]
             p = train_batches[c,:,:,:]
@@ -503,6 +510,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
 
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
+            util_loss_lst.append(torch.mean(torch.sum(util, dim=1)).item())
 
             if lagr_update_counter % 5 == 0:
                 lagr_optim.zero_grad()
@@ -515,6 +523,9 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             with torch.no_grad():
                 all_misreports[c,:,:,:] = curr_mis
             all_misreports.requires_grad_(True)
+        all_tot_loss_lst.append(tot_loss_lst)
+        all_rgt_loss_lst.append(rgt_loss_lst)
+        all_util_loss_lst.append(util_loss_lst)
 
         if i % 5 == 0:
             # TODO: ONLY WORKS FOR TWO TWO!!!!!
@@ -529,7 +540,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         print('lagr_loss', lagr_loss.item())
         print('mean util', torch.mean(torch.sum(util, dim=1)))
     #print(all_misreports)
-    return train_batches, rgt_loss_lst, tot_loss_lst
+    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
 parser = argparse.ArgumentParser()
 
