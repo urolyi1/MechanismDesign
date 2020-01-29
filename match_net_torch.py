@@ -73,9 +73,7 @@ class MatchNet(nn.Module):
         else:
             self.internalW = torch.ones(self.int_structures)
 
-    def save(self, filename_prefix=None):
-        if filename_prefix is None:
-            filename_prefix = f'matchnet_{curr_timestamp()}'
+    def save(self, filename_prefix='./'):
 
         torch.save(self.neural_net.state_dict(), filename_prefix+'matchnet.pytorch')
 
