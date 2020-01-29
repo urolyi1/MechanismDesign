@@ -380,6 +380,7 @@ def two_two_experiment(args):
 
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
+    torch.save(prefix+'internal_s.pytorch', internal_s)
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
     # Internal compatbility matrix [n_types, n_int_structures]
 
