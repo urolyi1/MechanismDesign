@@ -403,14 +403,17 @@ def two_two_experiment(args):
     #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     #print(final_p[0])
     model.save(filename_prefix=prefix)
-    torch.save(batches, prefix+'batch.pytorch')
+    torch.save(batches, prefix+'train_batches.pytorch')
 
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+    torch.save(test_batches, prefix+'test_batches.pytorch')
 
     final_train_regrets = test_model_performance(batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
     test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0)
     print('test batch regrets', test_regrets)
     print('train batch regrets', final_train_regrets)
+    torch.save(test_regrets, prefix+'test_batch_regrets.pytorch')
+    torch.save(final_train_regrets, prefix+'train_batch_regrets.pytorch')
 
 
 def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, init_iter=50):
