@@ -38,7 +38,7 @@ class MatchNet(nn.Module):
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
-        self.control_strength = 100.0
+        self.control_strength = 5
     
         constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
@@ -365,6 +365,7 @@ def two_two_experiment(args):
 
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -389,18 +390,19 @@ def two_two_experiment(args):
     print(rgt_loss_lst)
 
     # Actually look at the allocations to see if they make sense
-    print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
-    print(final_p[0])
+    #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
+    #print(final_p[0])
     prefix = f'test{curr_timestamp()}'
-    model.save(filename_prefix=prefix)
-    torch.save(batches, prefix+'_batch.pytorch')
+    #model.save(filename_prefix=prefix)
+    #torch.save(batches, prefix+'_batch.pytorch')
 
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
     final_train_regrets = test_model_performance(batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
-    test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
+    test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0)
     print('test batch regrets', test_regrets)
     print('train batch regrets', final_train_regrets)
+
 
 def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, init_iter=50):
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
@@ -470,7 +472,6 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     rgt_loss_lst = []
     # Training loop
     all_misreports = train_batches.clone().detach()
-    print(train_batches)
     for i in range(main_iter):
         for c in tqdm(range(train_batches.shape[0])):
             # true input by batch dim [batch size, n_hos, n_types]
@@ -521,16 +522,16 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         print('non-quadratic regret', rgt)
         print('lagr_loss', lagr_loss.item())
         print('mean util', torch.mean(torch.sum(util, dim=1)))
-    print(all_misreports)
+    #print(all_misreports)
     return train_batches, rgt_loss_lst, tot_loss_lst
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=25, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
-parser.add_argument('--nbatch', type=int, default=8, help='number of batches')
+parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport learning rate')
 
