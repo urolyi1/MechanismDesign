@@ -1,4 +1,5 @@
 import itertools
+import json
 import pickle
 
 import torch
@@ -13,13 +14,14 @@ from datetime import datetime
 import diffcp
 from tqdm import tqdm as tqdm
 import time
+import os
 
 def curr_timestamp():
-    return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H:%M:%S')
+    return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
 
 class MatchNet(nn.Module):
 
-    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None):
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None, control_strength=5):
         
         super(MatchNet, self).__init__()
         self.n_hos = n_hos
@@ -38,7 +40,7 @@ class MatchNet(nn.Module):
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
-        self.control_strength = 5
+        self.control_strength = control_strength
     
         constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
@@ -75,7 +77,7 @@ class MatchNet(nn.Module):
         if filename_prefix is None:
             filename_prefix = f'matchnet_{curr_timestamp()}'
 
-        torch.save(self.neural_net.state_dict(), filename_prefix + '.pytorch')
+        torch.save(self.neural_net.state_dict(), filename_prefix+'matchnet.pytorch')
 
     #n_hos, n_types, num_structs, int_structs, S, int_S, W = None, internalW = None):
         params_dict = {
@@ -89,12 +91,12 @@ class MatchNet(nn.Module):
             'internalW': self.internalW
         }
 
-        with open(filename_prefix+'_classvariables.pickle', 'wb') as f:
+        with open(filename_prefix+'matchnet_classvariables.pickle', 'wb') as f:
             pickle.dump(params_dict, f)
 
     @staticmethod
     def load(filename_prefix):
-        with open(filename_prefix + '_classvariables.pickle', 'rb') as f:
+        with open(filename_prefix + 'matchnet_classvariables.pickle', 'rb') as f:
             params_dict = pickle.load(f)
 
         result = MatchNet(
@@ -108,7 +110,7 @@ class MatchNet(nn.Module):
             internalW=params_dict['internalW']
         )
 
-        result.neural_net.load_state_dict(torch.load(filename_prefix+'.pytorch'))
+        result.neural_net.load_state_dict(torch.load(filename_prefix+'matchnet.pytorch'))
 
         return result
 
@@ -366,6 +368,11 @@ def two_two_experiment(args):
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
+    prefix = f'two_two_test{curr_timestamp()}/'
+    os.mkdir(prefix)
+    print(vars(args))
+    with open(prefix+'argfile.json', 'w') as f:
+        json.dump(vars(args), f)
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -378,7 +385,7 @@ def two_two_experiment(args):
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
     # Internal compatbility matrix [n_types, n_int_structures]
 
-    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s, control_strength=args.control_strength)
     #initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
     final_p, rgt_loss_lst, tot_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
@@ -392,9 +399,8 @@ def two_two_experiment(args):
     # Actually look at the allocations to see if they make sense
     #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     #print(final_p[0])
-    prefix = f'test{curr_timestamp()}'
-    #model.save(filename_prefix=prefix)
-    #torch.save(batches, prefix+'_batch.pytorch')
+    model.save(filename_prefix=prefix)
+    torch.save(batches, prefix+'batch.pytorch')
 
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
@@ -534,10 +540,12 @@ parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport learning rate')
+parser.add_argument('--random-seed', type=int, default=0, help='random seed')
+parser.add_argument('--control-strength', type=float, default=5, help='control strength in cvxpy objective')
 
 # parameters
 if __name__ == '__main__':
-    np.random.seed(0)
-    torch.manual_seed(0)
     args = parser.parse_args()
+    np.random.seed(args.random_seed)
+    torch.manual_seed(args.random_seed)
     two_two_experiment(args)
