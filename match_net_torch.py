@@ -380,7 +380,7 @@ def two_two_experiment(args):
 
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
-    torch.save(prefix+'internal_s.pytorch', internal_s)
+    np.save(prefix+'internal_s.npy', internal_s.numpy())
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
     # Internal compatbility matrix [n_types, n_int_structures]
 
@@ -402,10 +402,10 @@ def two_two_experiment(args):
     #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     #print(final_p[0])
     model.save(filename_prefix=prefix)
-    torch.save(batches, prefix+'train_batches.pytorch')
+    np.save(prefix+'train_batches.npy', batches.numpy())
 
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
-    torch.save(test_batches, prefix+'test_batches.pytorch')
+    np.save(prefix+'test_batches.npy', test_batches.numpy())
 
     final_train_regrets = test_model_performance(batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
     test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0)
