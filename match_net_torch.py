@@ -15,6 +15,7 @@ import diffcp
 from tqdm import tqdm as tqdm
 import time
 import os
+from scipy import sparse
 
 def curr_timestamp():
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
@@ -28,39 +29,39 @@ class MatchNet(nn.Module):
         self.n_types = n_types
         
         self.S = S
+        sparse_S = sparse.coo_matrix(S)
         self.int_S = int_S
+        sparse_int_S = sparse.coo_matrix(int_S)
 
         # creating the central matching cvxypy layer
         self.n_structures = num_structs  # TODO: figure out how many cycles
         self.n_h_t_combos = self.n_types * self.n_hos
 
         x1 = cp.Variable(self.n_structures)
-        s = cp.Parameter( (self.n_h_t_combos, self.n_structures) ) # valid structures
         w = cp.Parameter(self.n_structures)  # structure weight
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
         self.control_strength = control_strength
     
-        constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, sparse_S @ x1 <= b] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
         
-        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
+        self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b, z], variables=[x1])
 
         # INTERNAL MATCHING CVXPY LAYER
         self.int_structures = int_structs
 
         x_int = cp.Variable( self.int_structures )
-        int_s = cp.Parameter( (self.n_types, self.int_structures) )
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, int_s @ x_int <= int_b ] # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, sparse_int_S @ x_int <= int_b ] # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
-        self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
+        self.int_layer = CvxpyLayer(problem, parameters=[int_w, int_b], variables=[x_int])
 
         self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 128), nn.Tanh(), nn.Linear(128, 128),
                                         nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_structures))
@@ -142,12 +143,11 @@ class MatchNet(nn.Module):
         """
 
         # tile S matrix to accommodate batch_size
-        tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
         W = torch.ones(batch_size, self.n_structures) # currently weight all structurs same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, z, solver_args={'max_iters': 50000, 'verbose': False})
+        x1_out, = self.l_prog_layer(W, B, z, solver_args={'max_iters': 50000, 'verbose': False})
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
@@ -160,11 +160,10 @@ class MatchNet(nn.Module):
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
         
-        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
         W = torch.ones(batch_size, self.int_structures)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
+        x_int_out, = self.int_layer(W, B, solver_args={'max_iters': 50000, 'verbose': False})
 
         return x_int_out
         
