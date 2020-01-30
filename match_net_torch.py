@@ -30,19 +30,19 @@ class MatchNet(nn.Module):
         self.S = S
         self.int_S = int_S
 
-        # creating the central matching cvxypy layer
+        # Creating the central matching cvxypy layer
         self.n_structures = num_structs  # TODO: figure out how many cycles
         self.n_h_t_combos = self.n_types * self.n_hos
 
         x1 = cp.Variable(self.n_structures)
-        s = cp.Parameter( (self.n_h_t_combos, self.n_structures) ) # valid structures
+        s = cp.Parameter( (self.n_h_t_combos, self.n_structures) )  # valid structures
         w = cp.Parameter(self.n_structures)  # structure weight
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
         self.control_strength = control_strength
     
-        constraints = [x1 >= 0, s @ x1 <= b] # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
         problem = cp.Problem(objective, constraints)
         
@@ -56,7 +56,7 @@ class MatchNet(nn.Module):
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, int_s @ x_int <= int_b ] # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, int_s @ x_int <= int_b ]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
@@ -318,9 +318,11 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
 
 def create_train_sample(generator, num_batches, batch_size=16):
     """
-    :param generator:
-    :param num_batches:
-    :return:
+    Generate num_batches batches and stack them into a single tensor
+
+    :param generator: hospital true bid generator
+    :param num_batches: number of batches to generate
+    :return: tensor of batches [num_batches, batch_size, n_hos, n_types]
     """
     batches = []
     for i in range(num_batches):
@@ -329,11 +331,19 @@ def create_train_sample(generator, num_batches, batch_size=16):
 
 
 def blow_up_column(col_vector, num_hospitals):
+    """
+    Takes a single structure vector and blows it up to all possible version of that structure specifying hospital
+
+    :param col_vector: vector of a possible structure within the S matrix
+    :param num_hospitals: number of hospitals to blow up column to
+    :return: tensor of all possible version of structure with specific hospitals
+    """
+    # find which pairs are in the structure
     nonzero_inds,  = np.nonzero(col_vector)
     all_inds = []
     for ind in nonzero_inds:
         count = int(col_vector[ind])
-        all_inds.extend( count*[ind])
+        all_inds.extend(count*[ind])
     num_types = len(col_vector)
     all_hospitals = list(range(num_hospitals))
     num_outcomes = len(all_inds)
@@ -347,30 +357,54 @@ def blow_up_column(col_vector, num_hospitals):
     return np.stack(new_columns).transpose()
 
 
-def convert_internal_S(internal_S, num_hospitals):
+def convert_internal_S(single_S, num_hospitals):
+    """
+    Blowup a single S matrix with all possible structures between just pairs to be all possible structures
+    from hospital and pair.
+
+    :param single_S: structures matrix between just pairs
+    :param num_hospitals: number of hospitals in exchange
+    :return: Large structure matrix with all possible structures accounting for hospital and type
+    """
     all_cols = []
-    for col in range(internal_S.shape[1]):
-        all_cols.append(blow_up_column(internal_S[:,col], num_hospitals))
+    # Blow up all the columns in single structure matrix
+    for col in range(single_S.shape[1]):
+        all_cols.append(blow_up_column(single_S[:,col], num_hospitals))
     return np.concatenate(all_cols, axis=1)
 
 
 def internal_central_bloodtypes(num_hospitals):
+    """
+    :param num_hospitals: number of hospitals involved
+    :return: tuple of internal structure matrix and full structure matrix
+    """
     internal_s = np.load('bloodtypematrix.npy')
     central_s = convert_internal_S(internal_s, num_hospitals)
     return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
 
 def two_two_experiment(args):
+    """
+    Runs model on two hospital two type case
+
+    :param args: Model parameters
+    """
+
+    # lower and upper bound for hospital bid generator
     lower_lst = [[10, 20], [30, 60]]
     upper_lst = [[20, 40], [50, 100]]
 
+    # Create generator and batches
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
+    # Make directory and save args
     prefix = f'two_two_test{curr_timestamp()}/'
     os.mkdir(prefix)
     print(vars(args))
     with open(prefix+'argfile.json', 'w') as f:
         json.dump(vars(args), f)
+
+
     # parameters
     N_HOS = 2
     N_TYP = 2
@@ -378,14 +412,15 @@ def two_two_experiment(args):
     int_structures = 1
     batch_size = batches.shape[1]
 
+    # single structure matrix
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
-    np.save(prefix+'internal_s.npy', internal_s.numpy())
+    np.save(prefix+'internal_s.npy', internal_s.numpy())  # save structure matrix
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
-    # Internal compatbility matrix [n_types, n_int_structures]
 
+    # Create the model and train using hyperparameters from args
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s, control_strength=args.control_strength)
-    #initial_train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP, init_iter=args.init_iter, net_lr=args.main_lr)
+    #initial_train_loop(batches, model, batch_size, central_s, init_iter=args.init_iter, net_lr=args.main_lr)
     final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
                                                      net_lr=args.main_lr,
@@ -401,6 +436,8 @@ def two_two_experiment(args):
     # Actually look at the allocations to see if they make sense
     #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
     #print(final_p[0])
+
+    # Save model and results on train/test batches
     model.save(filename_prefix=prefix)
     np.save(prefix+'train_batches.npy', batches.numpy())
 
@@ -411,11 +448,14 @@ def two_two_experiment(args):
     test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0)
     print('test batch regrets', test_regrets)
     print('train batch regrets', final_train_regrets)
-    torch.save(test_regrets, prefix+'test_batch_regrets.pytorch')
+    torch.save(test_regrets, prefix+ 'test_batch_regrets.pytorch')
     torch.save(final_train_regrets, prefix+'train_batch_regrets.pytorch')
 
 
-def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-1, init_iter=50):
+def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, init_iter=50):
+    """
+    Train model without misreporting to learning optimal matching first
+    """
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     for i in range(init_iter):
         epoch_mean_loss = 0.0
@@ -431,7 +471,6 @@ def initial_train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP,
 
 
 def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0):
-
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
@@ -466,7 +505,7 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
 
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
-               misreport_iter=50, misreport_lr=1.0, rho=10.0):
+               misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
     # MASKS
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
@@ -476,18 +515,20 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     # initializing lagrange multipliers to 1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
     lagr_update_counter = 0
-    # Making model
+
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
     all_tot_loss_lst = []
     all_rgt_loss_lst = []
     all_util_loss_lst = []
+
     # Training loop
     all_misreports = train_batches.clone().detach()
     for i in range(main_iter):
         tot_loss_lst = []
         rgt_loss_lst = []
         util_loss_lst = []
+        # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0])):
             # true input by batch dim [batch size, n_hos, n_types]
             p = train_batches[c,:,:,:]
@@ -514,11 +555,14 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             rgt_loss_lst.append(rgt_loss.item())
             util_loss_lst.append(torch.mean(torch.sum(util, dim=1)).item())
 
+            # Update Lagrange multipliers every 5 iterations
             if lagr_update_counter % 5 == 0:
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
             lagr_update_counter += 1
+
+            # Update model weights
             model_optim.zero_grad()
             total_loss.backward()
             model_optim.step()
@@ -529,7 +573,8 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         all_rgt_loss_lst.append(rgt_loss_lst)
         all_util_loss_lst.append(util_loss_lst)
 
-        if i % 5 == 0:
+        # Print current allocations and difference between allocations and internal matching
+        if i % 5 == 0 and verbose:
             # TODO: ONLY WORKS FOR TWO TWO!!!!!
             counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
             internal_match = p.clone().detach()
@@ -541,7 +586,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         print('non-quadratic regret', rgt)
         print('lagr_loss', lagr_loss.item())
         print('mean util', torch.mean(torch.sum(util, dim=1)))
-    #print(all_misreports)
+
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
 parser = argparse.ArgumentParser()
