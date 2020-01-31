@@ -15,6 +15,8 @@ import diffcp
 from tqdm import tqdm as tqdm
 import time
 import os
+import matplotlib.pyplot as plt
+
 
 def curr_timestamp():
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
@@ -382,6 +384,37 @@ def internal_central_bloodtypes(num_hospitals):
     central_s = convert_internal_S(internal_s, num_hospitals)
     return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
 
+def benchmark_example():
+    """
+    Runs model on simple example for benchmark and profiling purposes
+    :param args:
+    :return:
+    """
+    lower_lst = [[10, 20], [30, 60]]
+    upper_lst = [[20, 40], [50, 100]]
+    generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
+    batches = create_train_sample(generator, 2, batch_size=3)
+
+    N_HOS = 2
+    N_TYP = 2
+    num_structures = 4
+    int_structures = 1
+    batch_size = batches.shape[1]
+
+    # single structure matrix
+    internal_s = torch.tensor([[1.0],
+                               [1.0]], requires_grad=False)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad=False, dtype=torch.float32)
+
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
+                     control_strength=3.0)
+    # initial_train_loop(batches, model, batch_size, central_s, init_iter=args.init_iter, net_lr=args.main_lr)
+    final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                                                                    main_iter=3,
+                                                                    net_lr=1e-1,
+                                                                    misreport_iter=10,
+                                                                    misreport_lr=5.0)
+
 def two_two_experiment(args):
     """
     Runs model on two hospital two type case
@@ -588,6 +621,40 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         print('mean util', torch.mean(torch.sum(util, dim=1)))
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
+
+
+def create_basic_plots(dir_name):
+    """
+    Creates basic plots for result of model
+
+    :param dir_name: name of directory with model
+    """
+    # load hyper parameters from json
+    with open(dir_name + 'argfile.json') as args_file:
+        args = json.load(args_file)
+
+    # load losses
+    tot_loss = np.load(dir_name + 'tot_loss.npy')
+    util_loss = np.load(dir_name + 'util_loss.npy')
+    rgt_loss = np.load(dir_name + 'rgt_loss.npy')
+    training_batches = np.load(dir_name + 'train_batches.npy')
+
+    # calculate optimal internal match mean in the batches
+    optimal_train_matching_util = 2 * training_batches.min(axis=-1).sum(axis=-1).mean()
+    optimal_test_matching_util = 2 * training_batches.min(axis=-1).sum(axis=-1).mean()
+
+    # Plot total loss and loss from regret
+    plt.figure()
+    plt.plot(np.arange(1, args['main_iter'] + 1), tot_loss.mean(axis=1), 'o--')
+    plt.plot(np.arange(1, args['main_iter'] + 1), rgt_loss.mean(axis=1), 'x--')
+    plt.legend(['Average Total loss', 'Average Regret loss'])
+
+    # Plot utility gained from matching
+    plt.figure()
+    plt.plot(np.arange(1, args['main_iter'] + 1), util_loss.mean(axis=1), 'o--')
+    plt.hlines(optimal_train_matching_util, linestyles='solid', xmin=0, xmax=args['main_iter'], color='red')
+    plt.legend(['MatchNet', 'Optimal strategy proof matching'], loc='lower right')
+
 
 parser = argparse.ArgumentParser()
 
