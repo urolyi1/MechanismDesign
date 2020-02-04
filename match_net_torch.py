@@ -17,6 +17,8 @@ import time
 import os
 import matplotlib.pyplot as plt
 
+from maximum_match import cvxpy_max_matching
+
 
 def curr_timestamp():
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
@@ -45,7 +47,7 @@ class MatchNet(nn.Module):
         self.control_strength = control_strength
     
         constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
+        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
         
         self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
@@ -169,7 +171,18 @@ class MatchNet(nn.Module):
         x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
 
         return x_int_out
-        
+
+    def integer_forward(self, X, batch_size):
+        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
+        w = torch.ones(self.n_structures).numpy() # currently weight all structurs same
+        x1_out = torch.zeros(batch_size, self.n_structures)
+        for batch in range(batch_size):
+            curr_X = X[batch].view(self.n_hos * self.n_types).detach().numpy()
+            curr_z = z[batch].detach().numpy()
+            resulting_vals = cvxpy_max_matching(self.S.numpy(), w, curr_X, curr_z, self.control_strength)
+            x1_out[batch,:] = torch.tensor(resulting_vals)
+        return x1_out
+
     def forward(self, X, batch_size):
         """
         Feed-forward output of network
@@ -379,6 +392,9 @@ def internal_central_bloodtypes(num_hospitals):
     """
     :param num_hospitals: number of hospitals involved
     :return: tuple of internal structure matrix and full structure matrix
+
+    "O-O","O-B","O-AB","O-A","B-O","B-B","B-AB","B-A","AB-O","AB-B","AB-AB","AB-A","A-O","A-B","A-AB","A-A"
+
     """
     internal_s = np.load('bloodtypematrix.npy')
     central_s = convert_internal_S(internal_s, num_hospitals)
