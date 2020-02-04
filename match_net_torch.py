@@ -379,6 +379,9 @@ def internal_central_bloodtypes(num_hospitals):
     """
     :param num_hospitals: number of hospitals involved
     :return: tuple of internal structure matrix and full structure matrix
+
+    "O-O","O-B","O-AB","O-A","B-O","B-B","B-AB","B-A","AB-O","AB-B","AB-AB","AB-A","A-O","A-B","A-AB","A-A"
+
     """
     internal_s = np.load('bloodtypematrix.npy')
     central_s = convert_internal_S(internal_s, num_hospitals)
