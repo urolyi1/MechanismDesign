@@ -1,8 +1,4 @@
 import cvxpy as cp
-import numpy as np
-import torch
-
-from match_net_torch import convert_internal_S
 
 
 def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
@@ -23,23 +19,3 @@ def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
     _b.value = b
     problem.solve(solver=cp.GUROBI)
     return x1.value
-
-
-
-
-if __name__ == '__main__':
-    internal_s = torch.tensor([[1.0],
-                               [1.0]], requires_grad=False)
-    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
-
-    print(central_s)
-    w = torch.ones(central_s.shape[1]).numpy()
-    b = np.array([2.0, 1.0, 1.0, 2.0])
-    print(b)
-    control_strength = 0.0
-    z = np.zeros_like(w)
-    result = cvxpy_max_matching(central_s.numpy(), w, b, z, control_strength)
-    print(result)
-
-
-
