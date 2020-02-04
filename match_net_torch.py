@@ -45,7 +45,7 @@ class MatchNet(nn.Module):
         self.control_strength = control_strength
     
         constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 2) )
+        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
         
         self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])

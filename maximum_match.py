@@ -1,24 +1,30 @@
-import gurobi as grb
+import cvxpy as cp
 import numpy as np
 import torch
 
 from match_net_torch import convert_internal_S
 
 
-def gurobi_max_matching(S_matrix, w, b):
+def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
     n_types = S_matrix.shape[0]
     n_structures = S_matrix.shape[1]
-    m = grb.Model("match")
-    x_vars = [m.addVar(vtype=grb.GRB.INTEGER, lb=0, name=f"x_{i}") for i in range(n_structures)]
-    row_sums = [grb.LinExpr(S_matrix[i,:], x_vars) for i in range(n_types)]
-    m.setObjective(grb.quicksum([wi * xi for (wi, xi) in zip(w, x_vars)]), grb.GRB.MAXIMIZE)
-    for i, row_sum in enumerate(row_sums):
-        m.addConstr(row_sum <= b[i], name=f"rowsum_{i}")
-    m.update()
-    m.optimize()
+    x1 = cp.Variable(n_structures, integer=True)
+    _s = cp.Parameter((n_types, n_structures))  # valid structures
+    _w = cp.Parameter(n_structures)  # structure weight
+    _z = cp.Parameter(n_structures)  # control parameter
+    _b = cp.Parameter(n_types)  # max bid
 
-    solns = [x.x for x in x_vars]
-    return solns
+    constraints = [x1 >= 0, S_matrix @ x1 <= b]  # constraint for positive allocation and less than true bid
+    objective = cp.Maximize((w.T @ x1) - control_strength * cp.norm(x1 - z, 1))
+    problem = cp.Problem(objective, constraints)
+    _s.value = S_matrix
+    _w.value = w
+    _z.value = z
+    _b.value = b
+    problem.solve(solver=cp.GUROBI)
+    return x1.value
+
+
 
 
 if __name__ == '__main__':
@@ -26,9 +32,13 @@ if __name__ == '__main__':
                                [1.0]], requires_grad=False)
     central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
 
+    print(central_s)
     w = torch.ones(central_s.shape[1]).numpy()
     b = np.array([2.0, 1.0, 1.0, 2.0])
-    result = gurobi_max_matching(central_s.numpy(), w, b)
+    print(b)
+    control_strength = 0.0
+    z = np.zeros_like(w)
+    result = cvxpy_max_matching(central_s.numpy(), w, b, z, control_strength)
     print(result)
 
 
