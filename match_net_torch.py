@@ -415,6 +415,36 @@ def benchmark_example():
                                                                     misreport_iter=10,
                                                                     misreport_lr=5.0)
 
+def realistic_experiment(args):
+    """
+    Runs model on two hospitals with real blood types
+
+    :param args:
+    """
+    hos_gen_lst = [gens.RealisticHospitalNoTissue(100), gens.RealisticHospital(100)]
+    generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
+    batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+
+    # Make directory and save args
+    prefix = f'real_two_test{curr_timestamp()}/'
+    os.mkdir(prefix)
+    print(vars(args))
+    with open(prefix + 'argfile.json', 'w') as f:
+        json.dump(vars(args), f)
+
+    N_HOS = 2
+    N_TYP = 16
+
+    internal_s = np.load('two_cycle_bloodtype_matrix.npy')
+    int_structures = internal_s.shape[1]
+    central_s = convert_internal_S(internal_s, N_HOS)
+    num_structures = central_s.shape[1]
+    batch_size = batches.shape[1]
+
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
+                     control_strength=args.control_strength)
+
+
 def two_two_experiment(args):
     """
     Runs model on two hospital two type case
