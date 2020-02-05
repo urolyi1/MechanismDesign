@@ -47,7 +47,7 @@ class MatchNet(nn.Module):
         self.control_strength = control_strength
     
         constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (w.T @ x1) - self.control_strength*cp.norm(x1 - z, 1) )
+        objective = cp.Maximize( (w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
         
         self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
@@ -354,7 +354,7 @@ def blow_up_column(col_vector, num_hospitals):
     :return: tensor of all possible version of structure with specific hospitals
     """
     # find which pairs are in the structure
-    nonzero_inds,  = np.nonzero(col_vector)
+    nonzero_inds, = np.nonzero(col_vector)
     all_inds = []
     for ind in nonzero_inds:
         count = int(col_vector[ind])
@@ -384,7 +384,7 @@ def convert_internal_S(single_S, num_hospitals):
     all_cols = []
     # Blow up all the columns in single structure matrix
     for col in range(single_S.shape[1]):
-        all_cols.append(blow_up_column(single_S[:,col], num_hospitals))
+        all_cols.append(blow_up_column(single_S[:, col], num_hospitals))
     return np.concatenate(all_cols, axis=1)
 
 
@@ -437,9 +437,10 @@ def realistic_experiment(args):
 
     :param args:
     """
-    hos_gen_lst = [gens.RealisticHospitalNoTissue(100), gens.RealisticHospital(100)]
+    hos_gen_lst = [gens.RealisticHospital(100), gens.RealisticHospital(100)]
     generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+    test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
     # Make directory and save args
     prefix = f'real_two_test{curr_timestamp()}/'
@@ -451,15 +452,21 @@ def realistic_experiment(args):
     N_HOS = 2
     N_TYP = 16
 
-    internal_s = np.load('two_cycle_bloodtype_matrix.npy')
+    internal_s = torch.tensor(np.load('two_cycle_bloodtype_matrix.npy'), requires_grad=False, dtype=torch.float32)
     int_structures = internal_s.shape[1]
-    central_s = convert_internal_S(internal_s, N_HOS)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS), requires_grad=False, dtype=torch.float32)
     num_structures = central_s.shape[1]
     batch_size = batches.shape[1]
-
+    print(central_s.size())
+    print(internal_s.size())
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
-
+    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                             main_iter=args.main_iter,
+                             net_lr=args.main_lr,
+                             misreport_iter=args.misreport_iter,
+                             misreport_lr=args.misreport_lr)
+    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=200)
 
 def two_two_experiment(args):
     """
@@ -475,6 +482,8 @@ def two_two_experiment(args):
     # Create generator and batches
     generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+    test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+
 
     # Make directory and save args
     prefix = f'two_two_test{curr_timestamp()}/'
@@ -495,40 +504,58 @@ def two_two_experiment(args):
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
     np.save(prefix+'internal_s.npy', internal_s.numpy())  # save structure matrix
-    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad = False, dtype=torch.float32)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad=False, dtype=torch.float32)
 
     # Create the model and train using hyperparameters from args
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s, control_strength=args.control_strength)
-    #initial_train_loop(batches, model, batch_size, central_s, init_iter=args.init_iter, net_lr=args.main_lr)
-    final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                                                      main_iter=args.main_iter,
                                                      net_lr=args.main_lr,
                                                      misreport_iter=args.misreport_iter,
                                                      misreport_lr=args.misreport_lr)
+    save_experiment(prefix, train_tuple, args, model, batches, test_batches)
 
-    print(tot_loss_lst)
-    print(rgt_loss_lst)
-    np.save(prefix+'util_loss.npy', util_loss_lst)
-    np.save(prefix+'rgt_loss.npy', rgt_loss_lst)
-    np.save(prefix+'tot_loss.npy', tot_loss_lst)
+
+def save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=100):
+    """
+    Saves results of experiment
+    :param prefix: directory prefix with /
+    :param train_tuple: tuple from train_loop()
+    :param args: args passed into experiment
+    :param model: model that was trained
+    :param batches: training batches
+    :param test_batches: test_batches
+    :param test_mis_iter: number of iterations in the misreport optimization for the test batches
+
+    :return: None
+    """
+    batch_size = batches.shape[1]
+
+    final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = train_tuple
+    np.save(prefix + 'util_loss.npy', util_loss_lst)
+    np.save(prefix + 'rgt_loss.npy', rgt_loss_lst)
+    np.save(prefix + 'tot_loss.npy', tot_loss_lst)
 
     # Actually look at the allocations to see if they make sense
-    #print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
-    #print(final_p[0])
+    # print((model.forward(final_p[0], batch_size) @ central_s.transpose(0, 1)).view(batch_size, 2, 2))
+    # print(final_p[0])
 
     # Save model and results on train/test batches
     model.save(filename_prefix=prefix)
-    np.save(prefix+'train_batches.npy', batches.numpy())
+    np.save(prefix + 'train_batches.npy', batches.numpy())
 
-    test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
-    np.save(prefix+'test_batches.npy', test_batches.numpy())
+    np.save(prefix + 'test_batches.npy', test_batches.numpy())
 
-    final_train_regrets = test_model_performance(batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=args.misreport_iter, misreport_lr=1.0)
-    test_regrets = test_model_performance(test_batches, model, batch_size, central_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0)
-    print('test batch regrets', test_regrets)
-    print('train batch regrets', final_train_regrets)
-    torch.save(test_regrets, prefix+ 'test_batch_regrets.pytorch')
-    torch.save(final_train_regrets, prefix+'train_batch_regrets.pytorch')
+    final_train_regrets = test_model_performance(batches, model,
+                                                 batch_size, model.S, model.n_hos, model.n_types,
+                                                 misreport_iter=args.misreport_iter, misreport_lr=1.0)
+    test_regrets = test_model_performance(test_batches, model, batch_size, model.S,
+                                          model.n_hos, model.n_types, misreport_iter=test_mis_iter, misreport_lr=1.0)
+    #print('test batch regrets', test_regrets)
+    #print('train batch regrets', final_train_regrets)
+
+    torch.save(test_regrets, prefix + 'test_batch_regrets.pytorch')
+    torch.save(final_train_regrets, prefix + 'train_batch_regrets.pytorch')
 
 
 def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, init_iter=50):
@@ -653,6 +680,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
         all_util_loss_lst.append(util_loss_lst)
 
         # Print current allocations and difference between allocations and internal matching
+        '''
         if i % 5 == 0 and verbose:
             # TODO: ONLY WORKS FOR TWO TWO!!!!!
             counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
@@ -660,6 +688,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             internal_match[:, :, 1] = internal_match[:, :, 0]
             print(counts)
             print(counts - internal_match)
+        '''
         print('total loss', total_loss.item())
         print('rgt_loss', rgt_loss.item())
         print('non-quadratic regret', rgt)
@@ -707,16 +736,19 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=16, help='batch size')
-parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=5.0, help='misreport learning rate')
+parser.add_argument('--batchsize', type=int, default=4, help='batch size')
+parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
+parser.add_argument('--misreport-iter', type=int, default=10, help='number of misreport iterations')
+parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=5, help='control strength in cvxpy objective')
+parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
+
+
 
 # parameters
 if __name__ == '__main__':
     args = parser.parse_args()
     np.random.seed(args.random_seed)
     torch.manual_seed(args.random_seed)
-    two_two_experiment(args)
+    #two_two_experiment(args)
+    realistic_experiment(args)

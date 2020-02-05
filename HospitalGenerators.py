@@ -1,56 +1,11 @@
 import numpy as np
 
 
-class RealisticHospitalNoTissue:
-    def __init__(self, k):
-        # [O, A, B, AB] Probabilities
-        self.bloodtypes = ['', 'A', 'B', 'AB']
-        self.bloodtype_probs = [0.48, 0.34, 0.14, 0.04]
-        self.bloodtype_cutoffs = [0.48, 0.82, 0.96, 1.0]
-
-        self.patients = k
-
-    def generate(self, batch_size):
-        num_types = len(self.bloodtype_probs)
-
-        # patient type, donor_type, patient tissue_type, donor tissue type
-        bids = np.zeros((batch_size, num_types, num_types))
-
-        for i in range(batch_size):
-            for j in range(self.patients):
-                bids[(i,) + self.generate_pair()] += 1.0
-
-        return bids.reshape((batch_size, -1))
-
-    def generate_pair(self):
-        incompat = False
-        ret_tuple = None
-        while (not incompat):
-            blood_idx = np.random.choice(len(self.bloodtype_probs), p=self.bloodtype_probs, size=2)
-            p_blood_idx = blood_idx[0]
-            d_blood_idx = blood_idx[1]
-
-            if (not self.is_blood_compat(p_blood_idx, d_blood_idx)):
-                incompat = True
-                ret_tuple = (p_blood_idx, d_blood_idx)
-
-        return ret_tuple
-
-    def is_blood_compat(self, p_idx, d_idx):
-        p_type = self.bloodtypes[p_idx]
-        d_type = self.bloodtypes[d_idx]
-        for ch in d_type:
-            if ch not in p_type:
-                return False
-        return True
-
-
 class RealisticHospital:
-    def __init__(self, k):
+    def __init__(self, k, with_tissue=False):
         # [O, A, B, AB] Probabilities
         self.bloodtypes = ['', 'A', 'B', 'AB']
-        self.bloodtype_probs = [0.48, 0.34, 0.14, 0.04]
-        self.bloodtype_cutoffs = [0.48, 0.82, 0.96, 1.0]
+        self.bloodtype_probs = [0.48, 0.14, 0.04, 0.34]
 
         # Tissue incompatibilitiy probabilities
         self.tissue_probs = [.7, .2, .1]
@@ -59,17 +14,24 @@ class RealisticHospital:
         # Tissue incompat values
         self.tissue_vals = [0.05, 0.45, 0.9]
         self.patients = k
+        self.tissue = with_tissue
 
     def generate(self, batch_size):
         num_types = len(self.bloodtype_probs)
         num_tissue = len(self.tissue_probs)
 
-        # patient type, donor_type, patient tissue_type, donor tissue type
-        bids = np.zeros((batch_size, num_types, num_types, num_tissue, num_tissue))
-
-        for i in range(batch_size):
-            for j in range(self.patients):
-                bids[(i,) + self.generate_pair()] += 1.0
+        if self.tissue:
+            # patient type, donor_type, patient tissue_type, donor tissue type
+            bids = np.zeros((batch_size, num_types, num_types, num_tissue, num_tissue))
+            for i in range(batch_size):
+                for j in range(self.patients):
+                    bids[(i,) + self.generate_pair()] += 1.0
+        else:
+            # patient type, donor_type,
+            bids = np.zeros((batch_size, num_types, num_types))
+            for i in range(batch_size):
+                for j in range(self.patients):
+                    bids[(i,) + self.generate_pair()[:2]] += 1.0
 
         return bids.reshape((batch_size, -1))
 
@@ -98,6 +60,7 @@ class RealisticHospital:
             if ch not in p_type:
                 return False
         return True
+
 
 class SingleHospital:
     def __init__(self, n_types, dist_lst):
