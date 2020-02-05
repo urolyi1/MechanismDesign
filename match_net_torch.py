@@ -19,6 +19,15 @@ import matplotlib.pyplot as plt
 
 from maximum_match import cvxpy_max_matching
 
+# ensures problem is not unbounded
+# no matching should ever include more than MAX_STRUCTURES of any structure
+MAX_STRUCTURES = 1000
+
+# how large of a negative value we will tolerate without raising an exception
+# this happens when the relaxed solution slightly overallocates
+# any negatives less than this will be clamped away
+NEGATIVE_TOL = 5e-2
+
 
 def curr_timestamp():
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
@@ -46,7 +55,7 @@ class MatchNet(nn.Module):
 
         self.control_strength = control_strength
     
-        constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, s @ x1 <= b, x1 <= MAX_STRUCTURES]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
         
@@ -60,7 +69,7 @@ class MatchNet(nn.Module):
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, int_s @ x_int <= int_b ]  # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, int_s @ x_int <= int_b, x_int <= MAX_STRUCTURES]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
@@ -147,12 +156,16 @@ class MatchNet(nn.Module):
 
         # tile S matrix to accommodate batch_size
         tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
-        W = torch.ones(batch_size, self.n_structures) # currently weight all structurs same
+        W = torch.ones(self.n_structures) # currently weight all structurs same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, z, solver_args={'max_iters': 50000, 'verbose': False})
-        return x1_out
+        sols = []
+        for i in range(batch_size):
+            x1_out, = self.l_prog_layer(self.S, W, B[i,:], z[i,:], solver_args={'max_iters': 50000, 'verbose': False})
+            sols.append(x1_out)
+
+        return torch.stack(sols)
 
     def internal_linear_prog(self, X, batch_size):
         """
@@ -164,13 +177,16 @@ class MatchNet(nn.Module):
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
         
-        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
-        W = torch.ones(batch_size, self.int_structures)
+        W = torch.ones(self.int_structures)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
+        # feed all parameters through cvxpy layer
+        sols = []
+        for i in range(batch_size):
+            x1_out, = self.int_layer(self.int_S, W, B[i, :], solver_args={'max_iters': 50000, 'verbose': False})
+            sols.append(x1_out)
 
-        return x_int_out
+        return torch.stack(sols)
 
     def integer_forward(self, X, batch_size):
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
@@ -252,13 +268,13 @@ class MatchNet(nn.Module):
             minquantity = (torch.min(p[:, i, :] - allocated)).item()
             if minquantity <= 0:
                 try:
-                    assert (abs(minquantity) < 1e-3)
+                    assert (abs(minquantity) < NEGATIVE_TOL)
                 except:
                     print(allocated)
                     print(p[:, i, :])
                     print(p[:, i, :] - allocated)
                     print(abs(minquantity))
-                    assert (abs(minquantity) < 1e-3)
+                    assert (abs(minquantity) < NEGATIVE_TOL)
             curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
             leftovers.append(curr_hos_leftovers)
         leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
