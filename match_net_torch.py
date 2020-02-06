@@ -55,11 +55,11 @@ class MatchNet(nn.Module):
 
         self.control_strength = control_strength
     
-        constraints = [x1 >= 0, s @ x1 <= b, x1 <= MAX_STRUCTURES]  # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, self.S @ x1 <= b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
         
-        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b, z], variables=[x1])
+        self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b, z], variables=[x1])
 
         # INTERNAL MATCHING CVXPY LAYER
         self.int_structures = int_structs
@@ -69,11 +69,11 @@ class MatchNet(nn.Module):
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, int_s @ x_int <= int_b, x_int <= MAX_STRUCTURES]  # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, self.int_S @ x_int <= int_b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
-        self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
+        self.int_layer = CvxpyLayer(problem, parameters=[int_w, int_b], variables=[x_int])
 
         self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 128), nn.Tanh(), nn.Linear(128, 128),
                                         nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_structures))
@@ -126,8 +126,6 @@ class MatchNet(nn.Module):
         return result
 
 
-
-
     def neural_net_forward(self, X):
         """
         INPUT
@@ -156,16 +154,15 @@ class MatchNet(nn.Module):
 
         # tile S matrix to accommodate batch_size
         tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
-        W = torch.ones(self.n_structures) # currently weight all structurs same
+        W = torch.ones(batch_size, self.n_structures)  # currently weight all structurs same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        sols = []
-        for i in range(batch_size):
-            x1_out, = self.l_prog_layer(self.S, W, B[i,:], z[i,:], solver_args={'max_iters': 50000, 'verbose': False})
-            sols.append(x1_out)
+        t0 = time.time()
+        x1_out, = self.l_prog_layer(W, B, z, solver_args={'max_iters': 50000, 'verbose': False, 'scale': 5.0})
+        print(f'central match took {time.time() - t0}', flush=True)
 
-        return torch.stack(sols)
+        return x1_out
 
     def internal_linear_prog(self, X, batch_size):
         """
@@ -177,16 +174,15 @@ class MatchNet(nn.Module):
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
         
-        W = torch.ones(self.int_structures)
+        W = torch.ones(batch_size, self.int_structures)
         B = X.view(batch_size, self.n_types)
 
         # feed all parameters through cvxpy layer
-        sols = []
-        for i in range(batch_size):
-            x1_out, = self.int_layer(self.int_S, W, B[i, :], solver_args={'max_iters': 50000, 'verbose': False})
-            sols.append(x1_out)
+        t0 = time.time()
+        x1_out, = self.int_layer(W, B, solver_args={'max_iters': 50000, 'verbose': False, 'eps': 1e-3, 'scale': 5.0})
+        print(f'internal match took {time.time() - t0}')
 
-        return torch.stack(sols)
+        return x1_out
 
     def integer_forward(self, X, batch_size):
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
@@ -453,7 +449,7 @@ def realistic_experiment(args):
 
     :param args:
     """
-    hos_gen_lst = [gens.RealisticHospital(100), gens.RealisticHospital(100)]
+    hos_gen_lst = [gens.RealisticHospital(20), gens.RealisticHospital(20)]
     generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -475,6 +471,11 @@ def realistic_experiment(args):
     batch_size = batches.shape[1]
     print(central_s.size())
     print(internal_s.size())
+
+    for batch in range(batches.shape[0]):
+        for inst in range(batches.shape[1]):
+            max_weight_matching = cvxpy_max_matching(central_s.numpy(), torch.ones(central_s.shape[1]).numpy(), batches[batch,inst,:].view(N_HOS * N_TYP).numpy(), torch.zeros(central_s.shape[1]).numpy(), 0)
+            print('max weight matching value', torch.sum(central_s @ max_weight_matching).item())
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
     train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
