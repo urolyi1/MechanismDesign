@@ -5,7 +5,7 @@ class RealisticHospital:
     def __init__(self, k, with_tissue=False):
         # [O, A, B, AB] Probabilities
         self.bloodtypes = ['', 'A', 'B', 'AB']
-        self.bloodtype_probs = [0.48, 0.34, 0.14, 0.04]
+        self.bloodtype_probs = [0.08, 0.34, 0.14, 0.44]
 
         # Tissue incompatibilitiy probabilities
         self.tissue_probs = [.7, .2, .1]

@@ -160,7 +160,7 @@ class MatchNet(nn.Module):
         # feed all parameters through cvxpy layer
         t0 = time.time()
         x1_out, = self.l_prog_layer(W, B, z, solver_args={'max_iters': 50000, 'verbose': False, 'scale': 5.0})
-        print(f'central match took {time.time() - t0}', flush=True)
+        # print(f'central match took {time.time() - t0}', flush=True)
 
         return x1_out
 
@@ -180,7 +180,7 @@ class MatchNet(nn.Module):
         # feed all parameters through cvxpy layer
         t0 = time.time()
         x1_out, = self.int_layer(W, B, solver_args={'max_iters': 50000, 'verbose': False, 'eps': 1e-3, 'scale': 5.0})
-        print(f'internal match took {time.time() - t0}')
+        # print(f'internal match took {time.time() - t0}')
 
         return x1_out
 
