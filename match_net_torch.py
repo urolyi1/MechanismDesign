@@ -443,6 +443,56 @@ def benchmark_example():
                                                                     misreport_iter=10,
                                                                     misreport_lr=5.0)
 
+def ashlagi_7_type_single(args):
+    N_HOS = 2
+    N_TYP = 7
+
+    batches = torch.tensor([
+        [
+            [[1.0,0.0,0.0,1.0,1.0,1.0,0.0],
+             [0.0,1.0,1.0,0.0,0.0,0.0,1.0]]
+        ]
+    ])
+    prefix = f'ashlagi_7_type{curr_timestamp()}/'
+    os.mkdir(prefix)
+    print(vars(args))
+    with open(prefix + 'argfile.json', 'w') as f:
+        json.dump(vars(args), f)
+    internal_s = torch.tensor(np.load('ashlagi_7_type.npy'),
+                              requires_grad=False, dtype=torch.float32)
+    int_structures = internal_s.shape[1]
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
+                             requires_grad=False, dtype=torch.float32)
+    num_structures = central_s.shape[1]
+    batch_size = batches.shape[1]
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
+                     control_strength=args.control_strength)
+
+    opt_util_mean = 0.0
+    for batch in range(batches.shape[0]):
+        # create mix and match weights
+        #weights_batch = max_match.create_match_weights(central_s, batches[batch, :])
+        for inst in range(batches.shape[1]):
+            optimal_matching = cvxpy_max_matching(central_s.numpy(),
+                                                  torch.ones(central_s.shape[1]).numpy(),
+                                                  batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
+                                                  torch.zeros(central_s.shape[1]).numpy(), 0)
+            opt_match_util = torch.sum(central_s @ optimal_matching).item()
+            opt_util_mean += opt_match_util / (batches.shape[0] * batches.shape[1])
+            print('max matching value', opt_match_util)
+            #mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[inst, :],
+            #                                            batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
+            #                                            torch.zeros(central_s.shape[1]).numpy(), 0)
+            #print('mix and match value', torch.sum(central_s @ optimal_matching).item())
+    print('max matching mean util', opt_util_mean)
+    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                             main_iter=args.main_iter,
+                             net_lr=args.main_lr,
+                             misreport_iter=args.misreport_iter,
+                             misreport_lr=args.misreport_lr)
+
+    #save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
+
 def ashlagi_7_type_experiment(args):
     N_HOS = 2
     N_TYP = 7
@@ -493,6 +543,7 @@ def ashlagi_7_type_experiment(args):
                              net_lr=args.main_lr,
                              misreport_iter=args.misreport_iter,
                              misreport_lr=args.misreport_lr)
+
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
 def realistic_experiment(args):
@@ -831,4 +882,5 @@ if __name__ == '__main__':
     torch.manual_seed(args.random_seed)
     #two_two_experiment(args)
     #realistic_experiment(args)
-    ashlagi_7_type_experiment(args)
+    #ashlagi_7_type_experiment(args)
+    ashlagi_7_type_single(args)
