@@ -16,7 +16,7 @@ from tqdm import tqdm as tqdm
 import time
 import os
 import matplotlib.pyplot as plt
-
+import maximum_match as max_match
 from maximum_match import cvxpy_max_matching
 
 # ensures problem is not unbounded
@@ -26,7 +26,7 @@ MAX_STRUCTURES = 1000
 # how large of a negative value we will tolerate without raising an exception
 # this happens when the relaxed solution slightly overallocates
 # any negatives less than this will be clamped away
-NEGATIVE_TOL = 5e-2
+NEGATIVE_TOL = 5e-1
 
 
 def curr_timestamp():
@@ -449,7 +449,7 @@ def realistic_experiment(args):
 
     :param args:
     """
-    hos_gen_lst = [gens.RealisticHospital(20), gens.RealisticHospital(20)]
+    hos_gen_lst = [gens.RealisticHospital(25), gens.RealisticHospital(25)]
     generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -471,13 +471,23 @@ def realistic_experiment(args):
     batch_size = batches.shape[1]
     print(central_s.size())
     print(internal_s.size())
-
-    for batch in range(batches.shape[0]):
-        for inst in range(batches.shape[1]):
-            max_weight_matching = cvxpy_max_matching(central_s.numpy(), torch.ones(central_s.shape[1]).numpy(), batches[batch,inst,:].view(N_HOS * N_TYP).numpy(), torch.zeros(central_s.shape[1]).numpy(), 0)
-            print('max weight matching value', torch.sum(central_s @ max_weight_matching).item())
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
+    for batch in range(batches.shape[0]):
+        # create mix and match weights
+        weights_batch = max_match.create_match_weights(central_s, batches[batch, :])
+        for inst in range(batches.shape[1]):
+            optimal_matching = cvxpy_max_matching(central_s.numpy(),
+                                                  torch.ones(central_s.shape[1]).numpy(),
+                                                  batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
+                                                  torch.zeros(central_s.shape[1]).numpy(), 0)
+
+            print('max matching value', torch.sum(central_s @ optimal_matching).item())
+            mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[inst, :],
+                                                        batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
+                                                        torch.zeros(central_s.shape[1]).numpy(), 0)
+            print('mix and match value', torch.sum(central_s @ optimal_matching).item())
+    
     train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                              main_iter=args.main_iter,
                              net_lr=args.main_lr,
@@ -533,7 +543,7 @@ def two_two_experiment(args):
     save_experiment(prefix, train_tuple, args, model, batches, test_batches)
 
 
-def save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=100):
+def save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50):
     """
     Saves results of experiment
     :param prefix: directory prefix with /
@@ -755,7 +765,7 @@ parser.add_argument('--main-iter', type=int, default=5, help='number of outer it
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=4, help='batch size')
 parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=10, help='number of misreport iterations')
+parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
