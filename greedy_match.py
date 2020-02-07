@@ -4,7 +4,6 @@ import torch.optim as optim
 import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
-import match_net_torch as match_net
 
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
@@ -23,32 +22,30 @@ class GreedyMatcher(nn.Module):
         self.n_h_t_combos = self.n_types * self.n_hos
 
         x1 = cp.Variable(self.n_structures)
-        s = cp.Parameter((self.n_h_t_combos, self.n_structures))  # valid structures
         w = cp.Parameter(self.n_structures)  # structure weight
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
         self.control_strength = 10.0
 
-        constraints = [x1 >= 0, s @ x1 <= b]  # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, self.S @ x1 <= b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize((w.T @ x1))
         problem = cp.Problem(objective, constraints)
 
-        self.l_prog_layer = CvxpyLayer(problem, parameters=[s, w, b], variables=[x1])
+        self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b], variables=[x1])
 
         # INTERNAL MATCHING CVXPY LAYER
         self.int_structures = int_structs
 
         x_int = cp.Variable(self.int_structures)
-        int_s = cp.Parameter((self.n_types, self.int_structures))
         int_w = cp.Parameter(self.int_structures)
         int_b = cp.Parameter(self.n_types)
 
         int_constraints = [x_int >= 0,
-                           int_s @ x_int <= int_b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize((int_w.T @ x_int))
+                           self.int_S @ x_int <= int_b]  # constraint for positive allocation and less than true bid
+        objective = cp.Maximize((int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
-        self.int_layer = CvxpyLayer(problem, parameters=[int_s, int_w, int_b], variables=[x_int])
+        self.int_layer = CvxpyLayer(problem, parameters=[int_w, int_b], variables=[x_int])
 
         if W is not None:
             self.W = W
@@ -79,7 +76,7 @@ class GreedyMatcher(nn.Module):
         B = X.view(batch_size, self.n_hos * self.n_types)  # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
-        x1_out, = self.l_prog_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
+        x1_out, = self.l_prog_layer(W, B, solver_args={'max_iters': 50000, 'verbose': False})
         return x1_out
 
     def internal_linear_prog(self, X, batch_size):
@@ -95,7 +92,7 @@ class GreedyMatcher(nn.Module):
         W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
 
-        x_int_out, = self.int_layer(tiled_S, W, B, solver_args={'max_iters': 50000, 'verbose': False})
+        x_int_out, = self.int_layer(W, B, solver_args={'max_iters': 50000, 'verbose': False})
 
         return x_int_out
 
@@ -204,52 +201,3 @@ class GreedyMatcher(nn.Module):
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
 
 
-def greedy_experiment():
-    print('estimating regret for greedy match...')
-    N_HOS = 2
-    N_TYP = 3
-    num_structures = 8
-    batch_size = 10
-    # MASKS
-    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-    main_iter = 30  # number of training iterations
-    # Large compatibility matrix [n_hos_pair_combos, n_structures]
-    single_s = torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
-                             [1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
-                             [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
-                             [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
-                             [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                             [0.0, 0.0, 1.0, 0.0, 1.0, 0.0]], requires_grad=False).t()
-    # Internal compatbility matrix [n_types, n_int_structures]
-    internal_s = torch.tensor([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0]], requires_grad=False).t()
-    # regret quadratic term weight
-    # true input by batch dim [batch size, n_hos, n_types]
-    p = torch.tensor(np.arange(batch_size * N_HOS * N_TYP)).view(batch_size, N_HOS, N_TYP).float()
-    # initializing lagrange multipliers to 1
-    # Making model
-    model = GreedyMatcher(N_HOS, N_TYP, num_structures, 2, single_s, internal_s)
-    tot_loss_lst = []
-    rgt_loss_lst = []
-    # Training loop
-    curr_mis = p.clone().detach().requires_grad_(True)
-
-    curr_mis = match_net.optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=5)
-
-    mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
-
-    output = model.forward(mis_input, batch_size * model.n_hos)
-    mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-    util = model.calc_util(model.forward(p, batch_size), single_s)
-
-    mis_diff = (mis_util - util)  # [batch_size, n_hos]
-
-    rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
-
-    # computes losses
-    print('mean regret', torch.mean(rgt).item())
-    print('mean util', torch.mean(torch.sum(util, dim=1)).item())

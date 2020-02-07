@@ -17,6 +17,7 @@ import time
 import os
 import matplotlib.pyplot as plt
 import maximum_match as max_match
+from greedy_match import GreedyMatcher
 from maximum_match import cvxpy_max_matching
 
 # ensures problem is not unbounded
@@ -333,6 +334,7 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
 
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
+        #print(torch.norm(curr_mis.grad))
 
         # Gradient descent
         with torch.no_grad():
@@ -443,6 +445,9 @@ def benchmark_example():
                                                                     misreport_iter=10,
                                                                     misreport_lr=5.0)
 
+
+
+
 def ashlagi_7_type_single(args):
     N_HOS = 2
     N_TYP = 7
@@ -468,6 +473,10 @@ def ashlagi_7_type_single(args):
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
 
+    greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
+
+    greedy_regrets = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
+    print('regrets on greedy match after 100 iters', greedy_regrets)
     opt_util_mean = 0.0
     for batch in range(batches.shape[0]):
         # create mix and match weights
@@ -706,7 +715,7 @@ def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, 
         print('mean loss', epoch_mean_loss / train_batches.shape[0])
 
 
-def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=100, misreport_lr=1.0):
+def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=20, misreport_lr=0.5):
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
@@ -718,10 +727,13 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
 
         p = test_batches[c, :, :, :]
         curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
+        print(curr_mis)
+        print(model.forward(p, batch_size))
 
         curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
                                        lr=misreport_lr)
 
+        print(curr_mis)
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
