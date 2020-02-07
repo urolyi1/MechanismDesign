@@ -75,6 +75,23 @@ class SingleHospital:
             X[:, i] = dist(size=batch_size)
         return X
 
+class GenericTypeHospital:
+    """
+    Given a probability distribution for types generate n patients according to that distribution
+    """
+    def __init__(self, type_probs, n_patients):
+        self.n_types = len(type_probs)
+        self.probs = type_probs
+        self.k = n_patients
+    
+    def generate(self, batch_size):
+        truthful_bid = np.zeros((batch_size, self.n_types))
+        for batch in range(batch_size):
+            for i in range(self.k):
+                rand_type = np.random.choice(np.arange(self.n_types), 1, p=self.probs)
+                truthful_bid[batch, int(rand_type)] += 1.0
+                
+        return truthful_bid
 
 class ReportGenerator:
     def __init__(self, hos_lst, single_report_shape):

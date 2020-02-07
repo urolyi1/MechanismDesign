@@ -443,13 +443,65 @@ def benchmark_example():
                                                                     misreport_iter=10,
                                                                     misreport_lr=5.0)
 
+def ashlagi_7_type_experiment(args):
+    N_HOS = 2
+    N_TYP = 7
+    hos1_probs = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
+    hos2_probs = [0, 0.33, 0.33, 0, 0, 0, 0.34]
+    hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
+                   gens.GenericTypeHospital(hos2_probs, 10)]
+
+    generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
+    batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+    test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+
+    # Make directory and save args
+    prefix = f'ashlagi_7_type{curr_timestamp()}/'
+    os.mkdir(prefix)
+    print(vars(args))
+    with open(prefix + 'argfile.json', 'w') as f:
+        json.dump(vars(args), f)
+    internal_s = torch.tensor(np.load('ashlagi_7_type.npy'),
+                                      requires_grad=False, dtype=torch.float32)
+    int_structures = internal_s.shape[1]
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
+                             requires_grad=False, dtype=torch.float32)
+    num_structures = central_s.shape[1]
+    batch_size = batches.shape[1]
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
+                     control_strength=args.control_strength)
+
+    opt_util_mean = 0.0
+    for batch in range(batches.shape[0]):
+        # create mix and match weights
+        #weights_batch = max_match.create_match_weights(central_s, batches[batch, :])
+        for inst in range(batches.shape[1]):
+            optimal_matching = cvxpy_max_matching(central_s.numpy(),
+                                                  torch.ones(central_s.shape[1]).numpy(),
+                                                  batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
+                                                  torch.zeros(central_s.shape[1]).numpy(), 0)
+            opt_match_util = torch.sum(central_s @ optimal_matching).item()
+            opt_util_mean += opt_match_util / (batches.shape[0] * batches.shape[1])
+            print('max matching value', opt_match_util)
+            #mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[inst, :],
+            #                                            batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
+            #                                            torch.zeros(central_s.shape[1]).numpy(), 0)
+            #print('mix and match value', torch.sum(central_s @ optimal_matching).item())
+    print('max matching mean util', opt_util_mean)
+    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                             main_iter=args.main_iter,
+                             net_lr=args.main_lr,
+                             misreport_iter=args.misreport_iter,
+                             misreport_lr=args.misreport_lr)
+    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
+
 def realistic_experiment(args):
     """
     Runs model on two hospitals with real blood types
 
     :param args:
     """
-    hos_gen_lst = [gens.RealisticHospital(25), gens.RealisticHospital(25)]
+    hos_gen_lst = [gens.RealisticHospital(3), gens.RealisticHospital(3)]
     generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -464,13 +516,13 @@ def realistic_experiment(args):
     N_HOS = 2
     N_TYP = 16
 
-    internal_s = torch.tensor(np.load('two_cycle_bloodtype_matrix.npy'), requires_grad=False, dtype=torch.float32)
+    internal_s = torch.tensor(np.load('two_cycle_bloodtype_matrix.npy'),
+                                      requires_grad=False, dtype=torch.float32)
     int_structures = internal_s.shape[1]
-    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS), requires_grad=False, dtype=torch.float32)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
+                             requires_grad=False, dtype=torch.float32)
     num_structures = central_s.shape[1]
     batch_size = batches.shape[1]
-    print(central_s.size())
-    print(internal_s.size())
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
     for batch in range(batches.shape[0]):
@@ -493,7 +545,7 @@ def realistic_experiment(args):
                              net_lr=args.main_lr,
                              misreport_iter=args.misreport_iter,
                              misreport_lr=args.misreport_lr)
-    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=200)
+    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
 def two_two_experiment(args):
     """
@@ -764,7 +816,7 @@ parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning r
 parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=4, help='batch size')
-parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
+parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
@@ -778,4 +830,5 @@ if __name__ == '__main__':
     np.random.seed(args.random_seed)
     torch.manual_seed(args.random_seed)
     #two_two_experiment(args)
-    realistic_experiment(args)
+    #realistic_experiment(args)
+    ashlagi_7_type_experiment(args)
