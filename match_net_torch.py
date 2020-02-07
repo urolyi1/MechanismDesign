@@ -454,8 +454,8 @@ def ashlagi_7_type_single(args):
 
     batches = torch.tensor([
         [
-            [[1.0,0.0,0.0,1.0,1.0,1.0,0.0],
-             [0.0,1.0,1.0,0.0,0.0,0.0,1.0]]
+            [[10.0,0.0,0.0,10.0,10.0,10.0,0.0],
+             [0.0,10.0,10.0,0.0,0.0,0.0,10.0]]
         ]
     ])
     prefix = f'ashlagi_7_type{curr_timestamp()}/'
@@ -728,11 +728,16 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
         p = test_batches[c, :, :, :]
         curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
         print(curr_mis)
-        print(model.forward(p, batch_size))
 
         curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
                                        lr=misreport_lr)
 
+        integer_truthful = model.integer_forward(p, batch_size)
+        integer_misreports = model.integer_forward(curr_mis, batch_size)
+        print('integer on truthful', integer_truthful)
+        print((model.S @ integer_truthful[0]).view(2,-1))
+        print('integer on misreports', integer_misreports)
+        print((model.S @ integer_misreports[0]).view(2,-1))
         print(curr_mis)
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
