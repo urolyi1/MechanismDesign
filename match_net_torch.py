@@ -739,6 +739,7 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
         print('integer on misreports', integer_misreports)
         print((model.S @ integer_misreports[0]).view(2,-1))
         print(curr_mis)
+        
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
