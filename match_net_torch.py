@@ -495,7 +495,7 @@ def ashlagi_7_type_single(args):
 
     greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
 
-    greedy_regrets = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
+    greedy_regrets, _ = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
     print('regrets on greedy match after 100 iters', greedy_regrets)
     opt_util_mean = 0.0
     for batch in range(batches.shape[0]):
@@ -595,7 +595,7 @@ def ashlagi_7_type_experiment(args):
     print('greedy int util difference', greedy_utils[3] - greedy_utils[2])
     print('learned util difference', learned_utils[1] - learned_utils[0])
     print('learned int util difference', learned_utils[3] - learned_utils[2])
-    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
+    save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50, greedy_matcher=greedy_matcher)
 
 def realistic_experiment(args):
     """
@@ -697,7 +697,7 @@ def two_two_experiment(args):
     save_experiment(prefix, train_tuple, args, model, batches, test_batches)
 
 
-def save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50):
+def save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50, greedy_matcher=None):
     """
     Saves results of experiment
     :param prefix: directory prefix with /
@@ -707,6 +707,7 @@ def save_experiment(prefix, train_tuple, args, model, batches, test_batches, tes
     :param batches: training batches
     :param test_batches: test_batches
     :param test_mis_iter: number of iterations in the misreport optimization for the test batches
+    ;param greedy_matcher: greedy matcher if computing utils at end
 
     :return: None
     """
@@ -727,16 +728,28 @@ def save_experiment(prefix, train_tuple, args, model, batches, test_batches, tes
 
     np.save(prefix + 'test_batches.npy', test_batches.numpy())
 
-    final_train_regrets = test_model_performance(batches, model,
+    final_train_regrets, _ = test_model_performance(batches, model,
                                                  batch_size, model.S, model.n_hos, model.n_types,
                                                  misreport_iter=args.misreport_iter, misreport_lr=1.0)
-    test_regrets = test_model_performance(test_batches, model, batch_size, model.S,
+    test_regrets, test_misreports = test_model_performance(test_batches, model, batch_size, model.S,
                                           model.n_hos, model.n_types, misreport_iter=test_mis_iter, misreport_lr=1.0)
     #print('test batch regrets', test_regrets)
     #print('train batch regrets', final_train_regrets)
 
     torch.save(test_regrets, prefix + 'test_batch_regrets.pytorch')
     torch.save(final_train_regrets, prefix + 'train_batch_regrets.pytorch')
+    if greedy_matcher:
+        greedy_utils = compare_central_internal_utils(test_batches, greedy_matcher)
+        learned_utils = compare_central_internal_utils(test_batches, model)
+        misreport_greedy_utils = compare_central_internal_utils(test_misreports, greedy_matcher)
+        misreport_learned_utils = compare_central_internal_utils(test_misreports, model)
+        for obj, name in zip(
+                [greedy_utils, learned_utils, misreport_greedy_utils, misreport_learned_utils],
+                ['test_greedy_utils.pickle', 'test_learned_utils.pickle', 'misreport_greedy_utils.pickle',
+                 'misreport_learned_utils.pickle']):
+            with open(prefix + name, 'wb') as f:
+                pickle.dump(obj, f)
+
 
 
 def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, init_iter=50):
@@ -796,7 +809,7 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
 
 
         all_misreports.requires_grad_(True)
-    return regrets
+    return regrets, all_misreports
 
 
 # what we want to know is, what's the difference btwn our allocation total utility (on central matching only,
