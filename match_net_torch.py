@@ -170,7 +170,7 @@ class MatchNet(nn.Module):
         INPUT
         ------
         X: All internal bids [batch_size * n_hos, n_types]
-        batch_size: number of samples in batch
+        batch_size: number of samples in batch (confusing name ambiguity)
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
@@ -185,7 +185,27 @@ class MatchNet(nn.Module):
 
         return x1_out
 
+    def internal_integer_forward(self, X, batch_size):
+        """
+        X: [batch_size * n_hos, n_types]
+        """
+        w = torch.ones(self.int_structures).numpy()
+        x2_out = torch.zeros(batch_size, self.int_structures)
+        for batch in range(batch_size):
+            curr_B = X[batch].view(self.n_types).detach().numpy()
+            curr_z = np.zeros_like(w)
+            resulting_vals = cvxpy_max_matching(self.int_S.numpy(), w, curr_B, curr_z, 0.0)
+            x2_out[batch, :] = torch.tensor(resulting_vals)
+        return x2_out
+
     def integer_forward(self, X, batch_size):
+        """
+        INPUT:
+        X: [batch_size, n_hos, n_types]
+
+        OUTPUT:
+        x1_out: [batch_size, n_hos, n_types]
+        """
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
         w = torch.ones(self.n_structures).numpy() # currently weight all structurs same
         x1_out = torch.zeros(batch_size, self.n_structures)
@@ -500,6 +520,8 @@ def ashlagi_7_type_single(args):
                              misreport_iter=args.misreport_iter,
                              misreport_lr=args.misreport_lr)
 
+    print('greedy --- internal util: {}; central util: {}; int internal util: {}; int central util: {}'.format(*compare_central_internal_utils(batches, greedy_matcher)))
+    print('learned --- internal util: {}; central util: {}; int internal util: {}; int central util: {}'.format(*compare_central_internal_utils(batches, model)))
     #save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
 def ashlagi_7_type_experiment(args):
@@ -561,6 +583,13 @@ def ashlagi_7_type_experiment(args):
                              misreport_iter=args.misreport_iter,
                              misreport_lr=args.misreport_lr)
 
+    greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
+    greedy_utils = compare_central_internal_utils(batches, greedy_matcher)
+    learned_utils = compare_central_internal_utils(batches, model)
+    print('greedy util difference', greedy_utils[1] - greedy_utils[0])
+    print('greedy int util difference', greedy_utils[3] - greedy_utils[2])
+    print('learned util difference', learned_utils[1] - learned_utils[0])
+    print('learned int util difference', learned_utils[3] - learned_utils[2])
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
 def realistic_experiment(args):
@@ -747,6 +776,7 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
         print('integer on misreports', integer_misreports)
         print((model.S @ integer_misreports[0]).view(2,-1))
         print(curr_mis)
+        
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
@@ -764,6 +794,29 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
     return regrets
 
 
+# what we want to know is, what's the difference btwn our allocation total utility (on central matching only,
+# because maximal we assume no leftovers are matched internally) and the alternative of doing ONLY internal matching
+# in both the integer and relaxed cases
+
+def compare_central_internal_utils(batches, model):
+    batch_size = batches.shape[1]
+    for c in range(batches.shape[0]):
+        p = batches[c,:,:,:]
+        model_alloc = model.forward(p, batch_size)
+        model_alloc_integer = model.integer_forward(p, batch_size)
+        central_util = model.calc_util(model_alloc, model.S)
+        central_integer_util = model.calc_util(model_alloc_integer, model.S)
+
+        flat_p = p.view(p.shape[0]*p.shape[1], p.shape[2])
+        internal_matches_only = model.internal_linear_prog(flat_p, p.shape[0]*p.shape[1])
+        internal_matches_only_integer = model.internal_integer_forward(flat_p, p.shape[0]*p.shape[1])
+
+        internal_counts = internal_matches_only.view(batch_size, model.n_hos, -1) @ torch.transpose(model.int_S, 0, 1)
+        internal_util = torch.sum(internal_counts, dim=2)
+
+        internal_counts_integer = internal_matches_only_integer.view(batch_size, model.n_hos, -1) @ torch.transpose(model.int_S, 0, 1)
+        internal_util_integer = torch.sum(internal_counts_integer, dim=2)
+        return internal_util, central_util, internal_util_integer, central_integer_util
 
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
@@ -907,5 +960,5 @@ if __name__ == '__main__':
     torch.manual_seed(args.random_seed)
     #two_two_experiment(args)
     #realistic_experiment(args)
-    #ashlagi_7_type_experiment(args)
-    ashlagi_7_type_single(args)
+    ashlagi_7_type_experiment(args)
+    #ashlagi_7_type_single(args)

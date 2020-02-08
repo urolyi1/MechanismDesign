@@ -5,6 +5,9 @@ import numpy as np
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 
+from maximum_match import cvxpy_max_matching
+
+
 class GreedyMatcher(nn.Module):
     # do we need this to be a module?
 
@@ -25,7 +28,7 @@ class GreedyMatcher(nn.Module):
         w = cp.Parameter(self.n_structures)  # structure weight
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
-        self.control_strength = 10.0
+        self.control_strength = 0.0
 
         constraints = [x1 >= 0, self.S @ x1 <= b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize((w.T @ x1))
@@ -132,6 +135,29 @@ class GreedyMatcher(nn.Module):
         other_hos = true_rep.view(1, -1, self.n_hos, self.n_types).repeat(self.n_hos, 1, 1, 1) * (1 - self_mask)
         result = only_mis + other_hos
         return result
+
+    def integer_forward(self, X, batch_size):
+        w = torch.ones(self.n_structures).numpy() # currently weight all structurs same
+        x1_out = torch.zeros(batch_size, self.n_structures)
+        for batch in range(batch_size):
+            curr_X = X[batch].view(self.n_hos * self.n_types).detach().numpy()
+            curr_z = np.zeros_like(w)
+            resulting_vals = cvxpy_max_matching(self.S.numpy(), w, curr_X, curr_z, self.control_strength)
+            x1_out[batch,:] = torch.tensor(resulting_vals)
+        return x1_out
+
+    def internal_integer_forward(self, X, batch_size):
+        """
+        X: [batch_size * n_hos, n_types]
+        """
+        w = torch.ones(self.int_structures).numpy()
+        x2_out = torch.zeros(batch_size, self.int_structures)
+        for batch in range(batch_size):
+            curr_B = X[batch].view(self.n_types).detach().numpy()
+            curr_z = np.zeros_like(w)
+            resulting_vals = cvxpy_max_matching(self.int_S.numpy(), w, curr_B, curr_z, 0.0)
+            x2_out[batch, :] = torch.tensor(resulting_vals)
+        return x2_out
 
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         """
