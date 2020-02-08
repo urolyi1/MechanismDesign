@@ -93,6 +93,22 @@ class GenericTypeHospital:
                 
         return truthful_bid
 
+class AshlagiHospital:
+    """
+    Given a probability distribution for types generate n patients according to that distribution
+    """
+    def __init__(self, type_probs, n_patients):
+        self.n_types = len(type_probs)
+        self.probs = type_probs
+        self.k = n_patients
+    
+    def generate(self, batch_size):
+        truthful_bid = np.zeros((batch_size, self.n_types))
+        for i in range(self.n_types):
+            if self.probs[i] > 0:
+                truthful_bid[:, i] = self.k  
+        return truthful_bid
+
 class ReportGenerator:
     def __init__(self, hos_lst, single_report_shape):
         self.hospitals = hos_lst

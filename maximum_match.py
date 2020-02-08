@@ -78,8 +78,8 @@ def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges)
     # Parameters
     batch_size = batch.shape[0]
     n_structs = central_S.shape[1]
-    n_hos = 2
-    n_types = 16
+    n_hos = batch.shape[1]
+    n_types = int(central_S.shape[0] / n_hos)
 
     weights_batch = np.zeros((batch_size, n_structs))
     # for each sample in batch
@@ -90,7 +90,7 @@ def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges)
         external_weight = 1 + 1 / (n_edges ** 2) + 1 / (n_edges ** (3)) * 1 / (n_edges ** (n_hos + 1))
         # for each structure in s matrix
         for col in range(n_structs):
-            struct = central_S[:, col].reshape(n_hos, n_types)
+            struct = central_S[:, col].numpy().reshape((n_hos, n_types))
             nonzero_inds = struct.nonzero()
             if len(nonzero_inds[0]) == 2:
                 hos0 = nonzero_inds[0][0]

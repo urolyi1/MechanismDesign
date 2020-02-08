@@ -529,13 +529,13 @@ def ashlagi_7_type_experiment(args):
     N_TYP = 7
     hos1_probs = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
     hos2_probs = [0, 0.33, 0.33, 0, 0, 0, 0.34]
-    hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
-                   gens.GenericTypeHospital(hos2_probs, 10)]
+    hos_gen_lst = [gens.AshlagiHospital(hos1_probs, 5),
+                   gens.AshlagiHospital(hos2_probs, 5)]
 
     generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
-
+    
     ashlagi_compat_dict = {}
     for i in range(1, N_TYP - 1):
         ashlagi_compat_dict[i] = []
@@ -559,12 +559,15 @@ def ashlagi_7_type_experiment(args):
     batch_size = batches.shape[1]
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                      control_strength=args.control_strength)
-
     opt_util_mean = 0.0
+    mix_util_mean = 0.0
+    print(batches[0, 0, :])
     for batch in range(batches.shape[0]):
         # create mix and match weights
         weights_batch = max_match.create_match_weights(central_s, batches[batch, :], ashlagi_compat_dict)
         for inst in range(batches.shape[1]):
+            weights = weights_batch[inst, :]
+            weights[:] = -1.0
             optimal_matching = cvxpy_max_matching(central_s.numpy(),
                                                   torch.ones(central_s.shape[1]).numpy(),
                                                   batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
@@ -572,11 +575,14 @@ def ashlagi_7_type_experiment(args):
             opt_match_util = torch.sum(central_s @ optimal_matching).item()
             opt_util_mean += opt_match_util / (batches.shape[0] * batches.shape[1])
             print('max matching value', opt_match_util)
-            mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[inst, :],
+            mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights,
                                                         batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
                                                         torch.zeros(central_s.shape[1]).numpy(), 0)
-            print('mix and match value', torch.sum(central_s @ optimal_matching).item())
+            mix_match_util = torch.sum(central_s @ optimal_matching).item()
+            mix_util_mean += mix_match_util / (batches.shape[0] * batches.shape[1])
+            print('mix and match value', mix_match_util)
     print('max matching mean util', opt_util_mean)
+    print('mix and match matching mean util', mix_util_mean)
     train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                              main_iter=args.main_iter,
                              net_lr=args.main_lr,
@@ -946,7 +952,7 @@ parser.add_argument('--main-iter', type=int, default=5, help='number of outer it
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=4, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=200, help='number of misreport iterations')
+parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=.1, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
