@@ -16,7 +16,7 @@ def is_blood_compat(p_type, d_type):
     return True
 
 
-def calc_n_edges(truthful_bids):
+def calc_edges_AB(truthful_bids, compat_dict):
     """
     Calculates the total number of edges.
 
@@ -49,7 +49,26 @@ def calc_n_edges(truthful_bids):
 
     return n_edges / 2.0
 
-def create_match_weights(central_S, batch):
+def calc_n_edges(bids, compat_dict):
+    """
+    bids: [n_hos, n_types]
+    """
+    n_hos = bids.shape[0]
+    n_types = bids.shape[1]
+    type_totals = bids.sum(axis=0)
+    n_edges = 0
+    for t in range(n_types):
+        num_patients = type_totals[t]
+        compat_types = compat_dict[t]
+        # compatible types
+        for compat_t in compat_types:
+            if t == compat_t:
+                n_edges += type_totals[t] * (type_totals[t] - 1)
+            else:
+                n_edges += type_totals[t] * type_totals[compat_t]
+    return n_edges / 2.0
+
+def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges):
     """
 
     :param central_S: S matrix for all structures and hospitals
@@ -66,7 +85,7 @@ def create_match_weights(central_S, batch):
     # for each sample in batch
     for i in range(batch_size):
         w = np.zeros(n_structs)
-        n_edges = calc_n_edges(batch[i, :, :])
+        n_edges = calc_edges(batch[i, :, :], compat_dict)
         internal_weight = n_edges + 3
         external_weight = 1 + 1 / (n_edges ** 2) + 1 / (n_edges ** (3)) * 1 / (n_edges ** (n_hos + 1))
         # for each structure in s matrix
@@ -88,6 +107,9 @@ def create_match_weights(central_S, batch):
                 w[col] = external_weight
         weights_batch[i] = w
     return weights_batch
+
+    
+
 
 def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
     """
