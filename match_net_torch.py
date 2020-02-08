@@ -575,6 +575,13 @@ def ashlagi_7_type_experiment(args):
                              misreport_iter=args.misreport_iter,
                              misreport_lr=args.misreport_lr)
 
+    greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
+    greedy_utils = compare_central_internal_utils(batches, greedy_matcher)
+    learned_utils = compare_central_internal_utils(batches, model)
+    print('greedy util difference', greedy_utils[1] - greedy_utils[0])
+    print('greedy int util difference', greedy_utils[3] - greedy_utils[2])
+    print('learned util difference', learned_utils[1] - learned_utils[0])
+    print('learned int util difference', learned_utils[3] - learned_utils[2])
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
 def realistic_experiment(args):
@@ -945,5 +952,5 @@ if __name__ == '__main__':
     torch.manual_seed(args.random_seed)
     #two_two_experiment(args)
     #realistic_experiment(args)
-    #ashlagi_7_type_experiment(args)
-    ashlagi_7_type_single(args)
+    ashlagi_7_type_experiment(args)
+    #ashlagi_7_type_single(args)
