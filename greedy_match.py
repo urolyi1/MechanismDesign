@@ -145,6 +145,20 @@ class GreedyMatcher(nn.Module):
             resulting_vals = cvxpy_max_matching(self.S.numpy(), w, curr_X, curr_z, self.control_strength)
             x1_out[batch,:] = torch.tensor(resulting_vals)
         return x1_out
+
+    def internal_integer_forward(self, X, batch_size):
+        """
+        X: [batch_size * n_hos, n_types]
+        """
+        w = torch.ones(self.int_structures).numpy()
+        x2_out = torch.zeros(batch_size, self.int_structures)
+        for batch in range(batch_size):
+            curr_B = X[batch].view(self.n_types).detach().numpy()
+            curr_z = np.zeros_like(w)
+            resulting_vals = cvxpy_max_matching(self.int_S.numpy(), w, curr_B, curr_z, 0.0)
+            x2_out[batch, :] = torch.tensor(resulting_vals)
+        return x2_out
+
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         """
         Takes misreport allocation and computes utility
