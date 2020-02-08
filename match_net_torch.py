@@ -529,8 +529,8 @@ def ashlagi_7_type_experiment(args):
     N_TYP = 7
     hos1_probs = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
     hos2_probs = [0, 0.33, 0.33, 0, 0, 0, 0.34]
-    hos_gen_lst = [gens.AshlagiHospital(hos1_probs, 5),
-                   gens.AshlagiHospital(hos2_probs, 5)]
+    hos_gen_lst = [gens.AshlagiHospital(hos1_probs, 1),
+                   gens.AshlagiHospital(hos2_probs, 1)]
 
     generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -567,7 +567,6 @@ def ashlagi_7_type_experiment(args):
         weights_batch = max_match.create_match_weights(central_s, batches[batch, :], ashlagi_compat_dict)
         for inst in range(batches.shape[1]):
             weights = weights_batch[inst, :]
-            weights[:] = -1.0
             optimal_matching = cvxpy_max_matching(central_s.numpy(),
                                                   torch.ones(central_s.shape[1]).numpy(),
                                                   batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
@@ -578,7 +577,7 @@ def ashlagi_7_type_experiment(args):
             mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights,
                                                         batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
                                                         torch.zeros(central_s.shape[1]).numpy(), 0)
-            mix_match_util = torch.sum(central_s @ optimal_matching).item()
+            mix_match_util = torch.sum(central_s @ mix_and_matching).item()
             mix_util_mean += mix_match_util / (batches.shape[0] * batches.shape[1])
             print('mix and match value', mix_match_util)
     print('max matching mean util', opt_util_mean)
