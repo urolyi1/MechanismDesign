@@ -351,7 +351,6 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
         # calculate utility from output only weighting utility from misreporting hospital
 
         mis_util = model.calc_mis_util(p, output, model.S, mis_mask)  # FIX inputs
-
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
         #print(torch.norm(curr_mis.grad))
@@ -495,24 +494,36 @@ def ashlagi_7_type_single(args):
 
     greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
 
+<<<<<<< Updated upstream
     greedy_regrets, _ = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
+=======
+    ashlagi_compat_dict = {}
+    for i in range(1, N_TYP - 1):
+        ashlagi_compat_dict[i] = []
+        ashlagi_compat_dict[i].append(i - 1)
+        ashlagi_compat_dict[i].append(i + 1)
+    ashlagi_compat_dict[0] = [1]
+    ashlagi_compat_dict[N_TYP - 1] = [N_TYP - 2]
+
+    greedy_regrets = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
+>>>>>>> Stashed changes
     print('regrets on greedy match after 100 iters', greedy_regrets)
     opt_util_mean = 0.0
     for batch in range(batches.shape[0]):
         # create mix and match weights
-        #weights_batch = max_match.create_match_weights(central_s, batches[batch, :])
-        for inst in range(batches.shape[1]):
+            weights_batch = max_match.create_match_weights(central_s, batches[batch, :], ashlagi_compat_dict)
             optimal_matching = cvxpy_max_matching(central_s.numpy(),
                                                   torch.ones(central_s.shape[1]).numpy(),
-                                                  batches[batch,inst,:].view(N_HOS * N_TYP).numpy(),
+                                                  batches[batch,:].view(N_HOS * N_TYP).numpy(),
                                                   torch.zeros(central_s.shape[1]).numpy(), 0)
             opt_match_util = torch.sum(central_s @ optimal_matching).item()
             opt_util_mean += opt_match_util / (batches.shape[0] * batches.shape[1])
             print('max matching value', opt_match_util)
-            #mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[inst, :],
-            #                                            batches[batch, inst, :].view(N_HOS * N_TYP).numpy(),
-            #                                            torch.zeros(central_s.shape[1]).numpy(), 0)
-            #print('mix and match value', torch.sum(central_s @ optimal_matching).item())
+            mix_and_matching = cvxpy_max_matching(central_s.numpy(), weights_batch[batch, :],
+                                                        batches[batch, :].view(N_HOS * N_TYP).numpy(),
+                                                        torch.zeros(central_s.shape[1]).numpy(), 0)
+            mix_match_util = torch.sum(central_s @ mix_and_matching).item()
+            print('mix and match value', mix_match_util)
     print('max matching mean util', opt_util_mean)
     train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
                              main_iter=args.main_iter,
@@ -529,8 +540,13 @@ def ashlagi_7_type_experiment(args):
     N_TYP = 7
     hos1_probs = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
     hos2_probs = [0, 0.33, 0.33, 0, 0, 0, 0.34]
+<<<<<<< Updated upstream
     hos_gen_lst = [gens.AshlagiHospital(hos1_probs, 1),
                    gens.AshlagiHospital(hos2_probs, 1)]
+=======
+    hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
+                   gens.GenericTypeHospital(hos2_probs, 10)]
+>>>>>>> Stashed changes
 
     generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -561,7 +577,6 @@ def ashlagi_7_type_experiment(args):
                      control_strength=args.control_strength)
     opt_util_mean = 0.0
     mix_util_mean = 0.0
-    print(batches[0, 0, :])
     for batch in range(batches.shape[0]):
         # create mix and match weights
         weights_batch = max_match.create_match_weights(central_s, batches[batch, :], ashlagi_compat_dict)
@@ -597,13 +612,40 @@ def ashlagi_7_type_experiment(args):
     print('learned int util difference', learned_utils[3] - learned_utils[2])
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50, greedy_matcher=greedy_matcher)
 
+def roth_negative_single(args):
+    N_HOS = 2
+    N_TYP = 4
+    internal_s = torch.tensor([
+                               [1., 0.],
+                               [1., 1.],
+                               [0., 1.],
+                               [0., 1.] 
+                               ])
+    batches = torch.tensor([
+        [
+            [[10.0,10.0,0.0,0.0],
+             [0.0,0.0,10.0,10.0]]
+        ]
+    ])
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
+                             requires_grad=False, dtype=torch.float32)
+    num_structures = central_s.shape[1]
+    batch_size = batches.shape[1]
+    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
+                     control_strength=args.control_strength)
+    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
+                             main_iter=args.main_iter,
+                             net_lr=args.main_lr,
+                             misreport_iter=args.misreport_iter,
+                             misreport_lr=args.misreport_lr)
+
 def realistic_experiment(args):
     """
     Runs model on two hospitals with real blood types
 
     :param args:
     """
-    hos_gen_lst = [gens.RealisticHospital(3), gens.RealisticHospital(3)]
+    hos_gen_lst = [gens.RealisticHospital(5), gens.RealisticHospital(5)]
     generator = gens.ReportGenerator(hos_gen_lst, (2, 16))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
     test_batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -649,6 +691,7 @@ def realistic_experiment(args):
                              misreport_lr=args.misreport_lr)
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50)
 
+
 def two_two_experiment(args):
     """
     Runs model on two hospital two type case
@@ -685,7 +728,7 @@ def two_two_experiment(args):
     internal_s = torch.tensor([[1.0],
                                [1.0]], requires_grad=False)
     np.save(prefix+'internal_s.npy', internal_s.numpy())  # save structure matrix
-    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), 2), requires_grad=False, dtype=torch.float32)
+    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS), requires_grad=False, dtype=torch.float32)
 
     # Create the model and train using hyperparameters from args
     model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s, control_strength=args.control_strength)
@@ -770,7 +813,7 @@ def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, 
         print('mean loss', epoch_mean_loss / train_batches.shape[0])
 
 
-def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=20, misreport_lr=0.5):
+def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=1000, misreport_lr=0.1):
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
@@ -875,7 +918,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             util = model.calc_util(model.forward(p, batch_size), single_s)
 
             mis_diff = (mis_util - util)  # [batch_size, n_hos]
-
+            mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
             rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
             # computes losses
@@ -959,13 +1002,13 @@ def create_basic_plots(dir_name):
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
+parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
+parser.add_argument('--main-iter', type=int, default=8, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=4, help='batch size')
-parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=20, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=.1, help='misreport learning rate')
+parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
+parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
+parser.add_argument('--misreport-lr', type=float, default=.25, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
 
@@ -976,7 +1019,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     np.random.seed(args.random_seed)
     torch.manual_seed(args.random_seed)
-    #two_two_experiment(args)
+    two_two_experiment(args)
     #realistic_experiment(args)
-    ashlagi_7_type_experiment(args)
+    #ashlagi_7_type_experiment(args)
     #ashlagi_7_type_single(args)
