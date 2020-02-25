@@ -493,10 +493,6 @@ def ashlagi_7_type_single(args):
                      control_strength=args.control_strength)
 
     greedy_matcher = GreedyMatcher(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s)
-
-<<<<<<< Updated upstream
-    greedy_regrets, _ = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
-=======
     ashlagi_compat_dict = {}
     for i in range(1, N_TYP - 1):
         ashlagi_compat_dict[i] = []
@@ -506,7 +502,6 @@ def ashlagi_7_type_single(args):
     ashlagi_compat_dict[N_TYP - 1] = [N_TYP - 2]
 
     greedy_regrets = test_model_performance(batches, greedy_matcher, batch_size, greedy_matcher.S, N_HOS, N_TYP)
->>>>>>> Stashed changes
     print('regrets on greedy match after 100 iters', greedy_regrets)
     opt_util_mean = 0.0
     for batch in range(batches.shape[0]):
@@ -540,13 +535,8 @@ def ashlagi_7_type_experiment(args):
     N_TYP = 7
     hos1_probs = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
     hos2_probs = [0, 0.33, 0.33, 0, 0, 0, 0.34]
-<<<<<<< Updated upstream
-    hos_gen_lst = [gens.AshlagiHospital(hos1_probs, 1),
-                   gens.AshlagiHospital(hos2_probs, 1)]
-=======
     hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
                    gens.GenericTypeHospital(hos2_probs, 10)]
->>>>>>> Stashed changes
 
     generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
     batches = create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
@@ -897,20 +887,26 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     all_rgt_loss_lst = []
     all_util_loss_lst = []
 
-    # Training loop
+    # Initialize best misreports to just truthful
     all_misreports = train_batches.clone().detach()
+
+    # Training loop
     for i in range(main_iter):
+        # Lists to track loss over iterations
         tot_loss_lst = []
         rgt_loss_lst = []
         util_loss_lst = []
+
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0])):
             # true input by batch dim [batch size, n_hos, n_types]
             p = train_batches[c,:,:,:]
             curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
 
+            # Run misreport optimization step
             curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
+            # Calculate utility from best misreports
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
             output = model.forward(mis_input, batch_size * model.n_hos)
