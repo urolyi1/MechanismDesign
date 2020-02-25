@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import itertools
 import match_net_torch as mn
-
+import util
 
 
 class Experiment:
@@ -18,7 +18,7 @@ class Experiment:
         """
         # Create internal and central structure matrix
         self.int_S = internal_S
-        self.central_S = mn.convert_internal_S(self.int_S, n_hos)
+        self.central_S = util.convert_internal_S(self.int_S, n_hos)
 
         # Setting some parameters
         self.int_structs = self.int_S.shape[1]
