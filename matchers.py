@@ -139,7 +139,6 @@ class MatchNet(Matcher):
         self.control_strength = control_strength
 
         x1 = cp.Variable(self.n_structures)
-        s = cp.Parameter( (self.n_h_t_combos, self.n_structures) )  # valid structures
         w = cp.Parameter(self.n_structures)  # structure weight
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
@@ -151,7 +150,6 @@ class MatchNet(Matcher):
         self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b, z], variables=[x1])
 
         x_int = cp.Variable( self.int_structures )
-        int_s = cp.Parameter( (self.n_types, self.int_structures) )
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
@@ -229,8 +227,6 @@ class MatchNet(Matcher):
         x1_out: allocation vector [batch_size, n_structures]
         """
 
-        # tile S matrix to accommodate batch_size
-        tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
         W = torch.ones(batch_size, self.n_structures)  # currently weight all structurs same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
@@ -356,8 +352,6 @@ class GreedyMatcher(Matcher):
         x1_out: allocation vector [batch_size, n_structures]
         """
 
-        # tile S matrix to accomodate batch_size
-        tiled_S = self.S.view(1, self.n_h_t_combos, self.n_structures).repeat(batch_size, 1, 1)
         W = self.W.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_hos * self.n_types)  # max bids to make sure not over allocated
 
@@ -374,7 +368,6 @@ class GreedyMatcher(Matcher):
 
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
-        tiled_S = self.int_S.view(1, self.n_types, self.int_structures).repeat(batch_size, 1, 1)
         W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
 
