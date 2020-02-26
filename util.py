@@ -47,6 +47,12 @@ def blow_up_column(col_vector, num_hospitals):
     return np.stack(new_columns).transpose()
 
 
+def all_possible_misreports(true_bid):
+    # gives iterators from 0 to max
+    all_iters = [range(i+1) for i in true_bid]
+    results = [np.array(x) for x in itertools.product(*all_iters)]
+    return results
+
 def internal_central_bloodtypes(num_hospitals):
     """
     :param num_hospitals: number of hospitals involved
