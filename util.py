@@ -29,11 +29,11 @@ def blow_up_column(col_vector, num_hospitals):
     :return: tensor of all possible version of structure with specific hospitals
     """
     # find which pairs are in the structure
-    nonzero_inds, = np.nonzero(col_vector)
+    (nonzero_inds,) = np.nonzero(col_vector)
     all_inds = []
     for ind in nonzero_inds:
         count = int(col_vector[ind])
-        all_inds.extend(count*[ind])
+        all_inds.extend(count * [ind])
     num_types = len(col_vector)
     all_hospitals = list(range(num_hospitals))
     num_outcomes = len(all_inds)
@@ -49,9 +49,10 @@ def blow_up_column(col_vector, num_hospitals):
 
 def all_possible_misreports(true_bid):
     # gives iterators from 0 to max
-    all_iters = [range(i+1) for i in true_bid]
+    all_iters = [range(i + 1) for i in true_bid]
     results = [np.array(x) for x in itertools.product(*all_iters)]
     return results
+
 
 def internal_central_bloodtypes(num_hospitals):
     """
@@ -61,6 +62,9 @@ def internal_central_bloodtypes(num_hospitals):
     "O-O","O-B","O-AB","O-A","B-O","B-B","B-AB","B-A","AB-O","AB-B","AB-AB","AB-A","A-O","A-B","A-AB","A-A"
 
     """
-    internal_s = np.load('bloodtypematrix.npy')
+    internal_s = np.load("bloodtypematrix.npy")
     central_s = convert_internal_S(internal_s, num_hospitals)
-    return torch.tensor(internal_s, dtype=torch.float32, requires_grad=False), torch.tensor(central_s, dtype=torch.float32, requires_grad=False)
+    return (
+        torch.tensor(internal_s, dtype=torch.float32, requires_grad=False),
+        torch.tensor(central_s, dtype=torch.float32, requires_grad=False),
+    )
