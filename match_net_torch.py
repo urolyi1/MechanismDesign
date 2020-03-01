@@ -417,8 +417,6 @@ def save_experiment(prefix, train_tuple, args, model, batches, test_batches, tes
                                                  misreport_iter=args.misreport_iter, misreport_lr=1.0)
     test_regrets, test_misreports = test_model_performance(test_batches, model, batch_size, model.S,
                                           model.n_hos, model.n_types, misreport_iter=test_mis_iter, misreport_lr=1.0)
-    #print('test batch regrets', test_regrets)
-    #print('train batch regrets', final_train_regrets)
 
     torch.save(test_regrets, prefix + 'test_batch_regrets.pytorch')
     torch.save(final_train_regrets, prefix + 'train_batch_regrets.pytorch')
@@ -520,11 +518,15 @@ def compare_central_internal_utils(batches, model):
         internal_util_integer = torch.sum(internal_counts_integer, dim=2)
         return internal_util, central_util, internal_util_integer, central_integer_util
 
+
 def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
     # MASKS
+    # self_mask only has 1's for indices of form [i, :, i, :]
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+
+    # Misreport mask that only has 1's for indices [i, :, i]
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
     mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
 
@@ -532,8 +534,11 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
     lagr_update_counter = 0
 
+    # Model optimizers
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
     lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
+
+    # Lists to track total loss, regret, and utility
     all_tot_loss_lst = []
     all_rgt_loss_lst = []
     all_util_loss_lst = []
@@ -555,15 +560,16 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
 
             # Run misreport optimization step
+            # TODO: Print better info about optimization at last starting utility vs ending utility maybe also net difference?
             curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
             # Calculate utility from best misreports
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
-
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
             util = model.calc_util(model.forward(p, batch_size), single_s)
 
+            # Difference between truthful utility and best misreport util
             mis_diff = (mis_util - util)  # [batch_size, n_hos]
             mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
             rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
@@ -573,6 +579,7 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
             total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
 
+            # Add performance to lists
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
             util_loss_lst.append(torch.mean(torch.sum(util, dim=1)).item())
@@ -588,23 +595,17 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
             model_optim.zero_grad()
             total_loss.backward()
             model_optim.step()
+
+            # Save current best misreport
             with torch.no_grad():
                 all_misreports[c,:,:,:] = curr_mis
             all_misreports.requires_grad_(True)
+
         all_tot_loss_lst.append(tot_loss_lst)
         all_rgt_loss_lst.append(rgt_loss_lst)
         all_util_loss_lst.append(util_loss_lst)
 
         # Print current allocations and difference between allocations and internal matching
-        '''
-        if i % 5 == 0 and verbose:
-            # TODO: ONLY WORKS FOR TWO TWO!!!!!
-            counts = (model.forward(p, batch_size) @ model.S.transpose(0, 1)).view(batch_size, 2, 2)
-            internal_match = p.clone().detach()
-            internal_match[:, :, 1] = internal_match[:, :, 0]
-            print(counts)
-            print(counts - internal_match)
-        '''
         print('total loss', total_loss.item())
         print('rgt_loss', rgt_loss.item())
         print('non-quadratic regret', rgt)
