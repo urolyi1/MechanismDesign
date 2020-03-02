@@ -5,8 +5,9 @@ import match_net_torch as mn
 import util
 
 
+
 class Experiment:
-    def __init__(self, args, internal_S, n_hos, n_types, model):
+    def __init__(self, args, internal_S, n_hos, n_types, model, dir='results/'):
         """
         Initialize Experiment
 
@@ -18,7 +19,8 @@ class Experiment:
         """
         # Create internal and central structure matrix
         self.int_S = internal_S
-        self.central_S = util.convert_internal_S(self.int_S, n_hos)
+        self.central_S = torch.tensor(util.convert_internal_S(self.int_S.numpy(), n_hos),
+                                      requires_grad=False, dtype=torch.float32)
 
         # Setting some parameters
         self.int_structs = self.int_S.shape[1]
@@ -35,14 +37,14 @@ class Experiment:
 
         # Train model on training sample
         self.train_tuple = mn.train_loop(train_batches, self.model, batch_size,
-                                    self.internal_S, self.n_hos, self.n_types)
+                                        self.central_S, self.n_hos, self.n_types)
 
         # Evaluate model on test_batches
         self.test_regrets, self.test_misreports = mn.test_model_performance(test_batches, self.model, batch_size,
-                                                                            self.internal_s, self.n_hos, self.n_types) # misreport_iter, misreport_lr
+                                                                            self.int_S, self.n_hos, self.n_types) # misreport_iter, misreport_lr
 
         if save:
-            self.save_experiment('default/', train_batches, test_batches)
+            self.save_experiment(dir, train_batches, test_batches)
 
     def save_experiment(self, dir, train_batches, test_batches):
         batch_size = train_batches.shape[1]

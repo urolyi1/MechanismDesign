@@ -54,7 +54,6 @@ class Matcher(nn.Module):
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
         """
-
         allocation = alloc_vec @ torch.transpose(S, 0, 1) # [batch_size, n_hos * n_types]
 
         return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
@@ -133,7 +132,7 @@ class Matcher(nn.Module):
 
 class MatchNet(Matcher):
 
-    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None, control_strength=5):
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None, control_strength=5.0):
 
         super(MatchNet, self).__init__(n_hos, n_types, num_structs, int_structs, S, int_S, W=W, internalW=internalW)
         self.control_strength = control_strength
@@ -142,8 +141,7 @@ class MatchNet(Matcher):
         w = cp.Parameter(self.n_structures)  # structure weight
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
-
-        constraints = [x1 >= 0, self.S @ x1 <= b]  # constraint for positive allocation and less than true bid
+        constraints = [x1 >= 0, self.S.numpy() @ x1 <= b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1) )
         problem = cp.Problem(objective, constraints)
 
@@ -153,7 +151,7 @@ class MatchNet(Matcher):
         int_w = cp.Parameter( self.int_structures )
         int_b = cp.Parameter( self.n_types )
 
-        int_constraints = [x_int >= 0, self.int_S @ x_int <= int_b]  # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, self.int_S.numpy() @ x_int <= int_b]  # constraint for positive allocation and less than true bid
         objective = cp.Maximize( (int_w.T @ x_int) )
         problem = cp.Problem(objective, int_constraints)
 
