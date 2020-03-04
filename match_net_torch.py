@@ -253,33 +253,6 @@ def ashlagi_7_type_experiment(args):
     print('learned int util difference', learned_utils[3] - learned_utils[2])
     save_experiment(prefix, train_tuple, args, model, batches, test_batches, test_mis_iter=50, greedy_matcher=greedy_matcher)
 
-def roth_negative_single(args):
-    N_HOS = 2
-    N_TYP = 4
-    internal_s = torch.tensor([
-                               [1., 0.],
-                               [1., 1.],
-                               [0., 1.],
-                               [0., 1.] 
-                               ])
-    batches = torch.tensor([
-        [
-            [[10.0,10.0,0.0,0.0],
-             [0.0,0.0,10.0,10.0]]
-        ]
-    ])
-    central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
-                             requires_grad=False, dtype=torch.float32)
-    num_structures = central_s.shape[1]
-    batch_size = batches.shape[1]
-    model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
-                     control_strength=args.control_strength)
-    train_tuple = train_loop(batches, model, batch_size, central_s, N_HOS, N_TYP,
-                             main_iter=args.main_iter,
-                             net_lr=args.main_lr,
-                             misreport_iter=args.misreport_iter,
-                             misreport_lr=args.misreport_lr)
-
 def realistic_experiment(args):
     """
     Runs model on two hospitals with real blood types
@@ -461,28 +434,31 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
     all_misreports = test_batches.clone().detach()
     regrets = []
     for c in range(test_batches.shape[0]):
-
+        # Truthful bid
         p = test_batches[c, :, :, :]
+
+        # Best misreport
         curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
-        print(curr_mis)
+        print('truthful bids', p)
+
 
         curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
                                        lr=misreport_lr)
-
+        print('Optimized best misreports', curr_mis)
         integer_truthful = model.integer_forward(p, batch_size)
         integer_misreports = model.integer_forward(curr_mis, batch_size)
         print('integer on truthful', integer_truthful)
-        print((model.S @ integer_truthful[0]).view(2,-1))
+        print('Integer allocation on truthful first sample', (model.S @ integer_truthful[0]).view(2,-1))
         print('integer on misreports', integer_misreports)
-        print((model.S @ integer_misreports[0]).view(2,-1))
-        print(curr_mis)
-        
+        print('Integer allocation on misreported first sample', (model.S @ integer_misreports[0]).view(2,-1))
+        print('truthful first sample', p[0])
+
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
 
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            util = model.calc_util(model.forward(p, batch_size), single_s)
+            util = model.calc_util(model.forward(p, batch_size), model.S)
 
             mis_diff = (mis_util - util)  # [batch_size, n_hos]
 
@@ -519,7 +495,7 @@ def compare_central_internal_utils(batches, model):
         return internal_util, central_util, internal_util_integer, central_integer_util
 
 
-def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
+def train_loop(train_batches, model, batch_size, S, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
                misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
     # MASKS
     # self_mask only has 1's for indices of form [i, :, i, :]
@@ -561,13 +537,22 @@ def train_loop(train_batches, model, batch_size, single_s, N_HOS, N_TYP, net_lr=
 
             # Run misreport optimization step
             # TODO: Print better info about optimization at last starting utility vs ending utility maybe also net difference?
+
+            # Print best misreport pre-misreport optimization
+            if verbose and lagr_update_counter % 5 == 0:
+                print('best misreport pre-optimization', curr_mis[0])
+
             curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
+
+            # Print best misreport post optimization
+            if verbose and lagr_update_counter % 5 == 0:
+                print('best misreport post-optimization', curr_mis[0])
 
             # Calculate utility from best misreports
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            util = model.calc_util(model.forward(p, batch_size), single_s)
+            util = model.calc_util(model.forward(p, batch_size), S)
 
             # Difference between truthful utility and best misreport util
             mis_diff = (mis_util - util)  # [batch_size, n_hos]

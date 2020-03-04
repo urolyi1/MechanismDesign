@@ -14,9 +14,6 @@ from util import convert_internal_S
 
 SAVE = False
 
-def curr_timestamp():
-    return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
-
 # Command line argument parser
 parser = argparse.ArgumentParser()
 
@@ -54,7 +51,7 @@ internal_s = torch.tensor([[1.0],
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS), requires_grad=False, dtype=torch.float32)
 
 # Make directory and save args
-prefix = f'two_two_test{mn.curr_timestamp()}/'
+prefix = f'two_two_test_{mn.curr_timestamp()}/'
 if SAVE:
     os.mkdir(prefix)
     print(vars(args))
