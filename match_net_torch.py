@@ -425,7 +425,7 @@ def initial_train_loop(train_batches, model, batch_size, single_s, net_lr=1e-1, 
         print('mean loss', epoch_mean_loss / train_batches.shape[0])
 
 
-def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_TYP, misreport_iter=1000, misreport_lr=0.1):
+def test_model_performance(test_batches, model, batch_size, N_HOS, N_TYP, misreport_iter=1000, misreport_lr=0.1):
     self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
     self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
     mis_mask = torch.zeros(N_HOS, 1, N_HOS)
@@ -444,7 +444,7 @@ def test_model_performance(test_batches, model, batch_size, single_s, N_HOS, N_T
 
         curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
                                        lr=misreport_lr)
-        print('Optimized best misreports', curr_mis)
+        print('Optimized best misreport on final mechanism', curr_mis)
         integer_truthful = model.integer_forward(p, batch_size)
         integer_misreports = model.integer_forward(curr_mis, batch_size)
         print('integer on truthful', integer_truthful)

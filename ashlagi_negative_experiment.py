@@ -18,11 +18,11 @@ SAVE = False
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=100, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=40, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=1, help='batch size')
 parser.add_argument('--nbatch', type=int, default=1, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=1000, help='number of misreport iterations')
+parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=.25, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
@@ -62,4 +62,4 @@ model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, intern
                  control_strength=args.control_strength)
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
-ashlagi_experiment.run_experiment(batches, batches, save=SAVE)
+ashlagi_experiment.run_experiment(batches, batches, save=SAVE, verbose=True)

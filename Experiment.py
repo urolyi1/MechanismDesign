@@ -34,18 +34,20 @@ class Experiment:
 
         self.dir = dir
 
-    def run_experiment(self, train_batches, test_batches, save=False):
+    def run_experiment(self, train_batches, test_batches, save=False, verbose=False):
         batch_size = train_batches.shape[1]
 
         # Train model on training sample
         self.train_tuple = mn.train_loop(train_batches, self.model, batch_size, self.central_S, self.n_hos,
                                          self.n_types, net_lr=self.model_args.main_lr, main_iter=self.model_args.main_iter,
                                          misreport_iter=self.model_args.misreport_iter,
-                                         misreport_lr=self.model_args.misreport_lr)
+                                         misreport_lr=self.model_args.misreport_lr, verbose=verbose)
 
         # Evaluate model on test_batches
-        self.test_regrets, self.test_misreports = mn.test_model_performance(test_batches, self.model, batch_size,
-                                                                            self.int_S, self.n_hos, self.n_types) # misreport_iter, misreport_lr
+        self.test_regrets, self.test_misreports = mn.test_model_performance(test_batches, self.model,
+                                                                            batch_size, self.n_hos, self.n_types,
+                                                                            misreport_iter=500,
+                                                                            misreport_lr=1.0)
 
         if save:
             self.save_experiment(self.dir, train_batches, test_batches)
@@ -68,12 +70,12 @@ class Experiment:
 
         np.save(dir + 'test_batches.npy', test_batches.numpy())
 
-        final_train_regrets, _ = mn.test_model_performance(train_batches, self.model, batch_size, self.model.S,
+        final_train_regrets, _ = mn.test_model_performance(train_batches, self.model, batch_size,
                                                            self.model.n_hos, self.model.n_types,
                                                            misreport_iter=self.model_args.misreport_iter,
                                                            misreport_lr=1.0)
 
-        test_regrets, test_misreports = mn.test_model_performance(test_batches, self.model, batch_size, self.model.S,
+        test_regrets, test_misreports = mn.test_model_performance(test_batches, self.model, batch_size,
                                                                   self.model.n_hos, self.model.n_types,
                                                                   misreport_iter=1000, misreport_lr=1.0)
 
