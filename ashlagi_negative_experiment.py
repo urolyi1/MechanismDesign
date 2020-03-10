@@ -20,7 +20,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=40, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=1, help='batch size')
+parser.add_argument('--batchsize', type=int, default=2, help='batch size')
 parser.add_argument('--nbatch', type=int, default=1, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=.25, help='misreport learning rate')
@@ -39,7 +39,9 @@ internal_s = torch.tensor([
 batches = torch.tensor([
     [
         [[10.0,10.0,0.0,0.0],
-         [0.0,0.0,10.0,10.0]]
+         [0.0,0.0,10.0,10.0]],
+        [[3.0,3.0,0.0,0.0],
+         [0.0,0.0,3.0,3.0]]
     ]
 ])
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
