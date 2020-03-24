@@ -37,8 +37,10 @@ hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
                gens.GenericTypeHospital(hos2_probs, 10)]
 
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
-batches = mn.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
-test_batches = mn.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+batches = torch.tensor([
+    [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
+        [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+])
 
 ashlagi_compat_dict = {}
 for i in range(1, N_TYP - 1):
@@ -61,7 +63,7 @@ int_structures = internal_s.shape[1]
 prefix = f'mix_match_{mn.curr_timestamp()}/'
 
 model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
-                 control_strength=args.control_strength)
+                 control_strength=0.0)
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 ashlagi_experiment.run_experiment(batches, batches, save=SAVE, verbose=True)
