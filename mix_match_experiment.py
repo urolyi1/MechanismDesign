@@ -63,7 +63,7 @@ int_structures = internal_s.shape[1]
 prefix = f'mix_match_{mn.curr_timestamp()}/'
 
 model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
-                 control_strength=0.0)
+                 control_strength=args.control_strength)
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 ashlagi_experiment.run_experiment(batches, batches, save=SAVE, verbose=True)
