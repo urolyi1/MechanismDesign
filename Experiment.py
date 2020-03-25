@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import itertools
+import os
 import match_net_torch as mn
 import util
 
@@ -54,6 +55,9 @@ class Experiment:
 
     def save_experiment(self, dir, train_batches, test_batches):
         batch_size = train_batches.shape[1]
+
+        if not os.path.exists(dir):
+            os.mkdir(dir)
 
         final_p, rgt_loss_lst, tot_loss_lst, util_loss_lst = self.train_tuple
         np.save(dir + 'util_loss.npy', util_loss_lst)
