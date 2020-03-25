@@ -11,8 +11,31 @@ import match_net_torch as mn
 import Experiment
 from matchers import MatchNet, GreedyMatcher
 from util import convert_internal_S
+import matplotlib.pyplot as plt
 
-SAVE = False
+SAVE = True
+
+
+def visualize_match_outcome(bids, allocation):
+    hospital_results = allocation.detach().view(2,7)
+    inds = np.arange(7)
+
+    fig, axes = plt.subplots(2)
+
+    bar_width = 0.25
+    axes[0].bar(inds, bids[0,0,:].numpy(), bar_width, color='b')
+    axes[0].bar(inds + bar_width, bids[0,1,:].numpy(), bar_width, color='r')
+    axes[0].set_title('Bids')
+
+    axes[1].bar(inds, hospital_results[0,:].numpy(), bar_width, color='b')
+    axes[1].bar(inds, hospital_results[1,:].numpy(), bar_width, color='r')
+    axes[1].set_title('Allocation')
+
+    plt.show()
+
+
+
+
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
@@ -41,6 +64,15 @@ batches = torch.tensor([
     [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
         [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
 ])
+strategic_batch_1 = torch.tensor([
+    [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
+        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+])
+
+strategic_batch_2 = torch.tensor([
+    [[[10.0000, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000, 0.0000],
+      [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+])
 
 ashlagi_compat_dict = {}
 for i in range(1, N_TYP - 1):
@@ -64,6 +96,17 @@ prefix = f'mix_match_{mn.curr_timestamp()}/'
 
 model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                  control_strength=args.control_strength)
+
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 ashlagi_experiment.run_experiment(batches, batches, save=SAVE, verbose=True)
+print('allocations on batch ', batches)
+allocs = model.forward(batches, batch_size) @ central_s.transpose(0, 1)
+visualize_match_outcome(batches[0], allocs)
+print(allocs.view(2, 7))
+print('allocations on misreport ', strategic_batch_1)
+allocs = model.forward(strategic_batch_1, batch_size) @ central_s.transpose(0, 1)
+print(allocs.view(2, 7))
+print('allocations on misreport ', strategic_batch_2)
+allocs = model.forward(strategic_batch_2, batch_size) @ central_s.transpose(0, 1)
+print(allocs.view(2, 7))
