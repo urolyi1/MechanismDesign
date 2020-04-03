@@ -41,22 +41,46 @@ class Matcher(nn.Module):
         else:
             self.internalW = torch.ones(self.int_structures)
 
-    def calc_util(self, alloc_vec, S):
+    def calc_util(self, alloc_vec, p, S):
         """
         Takes truthful allocation and computes utility
 
         INPUT
         ------
         alloc_vec: dim [batch_size, n_possible_cycles]
+        p: assumed truthful bids [batch_size, n_hos, n_types]
         S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
 
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
         """
-        allocation = alloc_vec @ torch.transpose(S, 0, 1) # [batch_size, n_hos * n_types]
+        batch_size = alloc_vec.shape[0]
+        allocation = (alloc_vec @ torch.transpose(S, 0, 1)).view(-1, self.n_hos, self.n_types) # [batch_size, n_hos , n_types]
 
-        return torch.sum(allocation.view(-1, self.n_hos, self.n_types), dim=-1)
+        central_util = torch.sum(allocation, dim=-1)
+
+
+        leftovers = []
+        for i in range(self.n_hos):
+            minquantity = (torch.min(p[:, i, :] - allocation[:, i, :])).item()
+            if minquantity <= 0:
+                try:
+                    assert (abs(minquantity) < NEGATIVE_TOL)
+                except:
+                    print(allocation)
+                    print(p[:, i, :])
+                    print(p[:, i, :] - allocation[:, i, :])
+                    print(abs(minquantity))
+                    assert (abs(minquantity) < NEGATIVE_TOL)
+            curr_hos_leftovers = (p[:, i, :] - allocation[:, i, :]).clamp(min=0)  # [batch_size, n_types]
+            leftovers.append(curr_hos_leftovers)
+        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
+        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
+        counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
+        internal_util = torch.sum(counts, dim=-1)
+
+        return central_util, internal_util
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
         """
