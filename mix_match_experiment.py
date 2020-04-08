@@ -10,10 +10,55 @@ import HospitalGenerators as gens
 import match_net_torch as mn
 import Experiment
 from matchers import MatchNet, GreedyMatcher
-from util import convert_internal_S
+from util import convert_internal_S, all_possible_misreports
 import matplotlib.pyplot as plt
 
 SAVE = False
+
+# enumerating all possible misreports.
+# against 2 single truthful reports
+# because we tile misreports, it is safe to put them 2 by 2 in batches, and compute utility on each in turn.
+# if one list is shorter, we can just pad it out to the other list, I think.
+
+def print_misreport_differences(model, truthful_bids):
+    p1_misreports = torch.tensor(all_possible_misreports(truthful_bids[0, :].numpy()))
+    p2_misreports = torch.tensor(all_possible_misreports(truthful_bids[1, :].numpy()))
+
+    if p1_misreports.shape[0] > p2_misreports.shape[0]:
+        to_pad = truthful_bids[1,:].repeat(p1_misreports.shape[0] - p2_misreports.shape[0], 1)
+        p2_misreports = torch.cat( (p2_misreports, to_pad ))
+
+    elif p2_misreports.shape[0] > p1_misreports.shape[0]:
+        to_pad = truthful_bids[0,:].repeat(p2_misreports.shape[0] - p1_misreports.shape[0], 1)
+        p1_misreports = torch.cat( (p1_misreports, to_pad ))
+
+    batched_misreports = torch.cat( (p1_misreports.unsqueeze(1), p2_misreports.unsqueeze(1)), dim=1)
+
+    # given batched misreports, we want to calc mis util for each one against truthful bids
+
+    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+
+    found_regret = False
+    for batch_ind in range(batched_misreports.shape[0]):
+        curr_mis = batched_misreports[batch_ind, :, :].unsqueeze(0)
+
+        mis_input = model.create_combined_misreport(curr_mis, truthful_bids, self_mask)
+        output = model.forward(mis_input, 1 * model.n_hos)
+        p = truthful_bids.unsqueeze(0)
+        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+
+        util = model.calc_util(model.forward(p, batch_size), model.S)
+
+        print(curr_mis)
+        pos_regret = torch.clamp(mis_util - util, min=0)
+        print(pos_regret)
+        found_regret = found_regret or (pos_regret > 1e-3).any().item()
+    print('found large positive regret: ', found_regret)
+
+
 
 
 def visualize_match_outcome(bids, allocation):
@@ -32,9 +77,6 @@ def visualize_match_outcome(bids, allocation):
     axes[1].set_title('Allocation')
 
     plt.show()
-
-
-
 
 
 # Command line argument parser
@@ -64,22 +106,33 @@ generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
 #     [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
 #         [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]])
 batches = torch.tensor([
-    [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
-        [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]],
-    [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
-      [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000]]],
-[[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
-        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
+        [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]],
+    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
+      [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]],
+[[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
+        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
 strategic_batch_1 = torch.tensor([
-    [[[10.0000, 0.0000, 0.0000, 10.0000, 10.0000, 10.0000, 0.0000],
-        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
+        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
 
 strategic_batch_2 = torch.tensor([
-    [[[10.0000, 0.0000, 0.0000, 0.0000, 0.0000, 10.0000, 0.0000],
-      [0.0000, 10.0, 10.0000, 0.0000, 0.0000, 0.0000, 10.0000]]]
+    [[[3.0000, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000, 0.0000],
+      [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
+
+small_batch = torch.tensor([
+    [[[3.0000, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000, 0.0000],
+      [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
+])
+
+unseen_batch = torch.tensor([
+    [[[0.0000, 3.0000, 0.0000, 0.0000, 0.0000, 2.0000, 0.0000],
+      [0.0000, 2.0, 1.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
+])
+
 
 ashlagi_compat_dict = {}
 for i in range(1, N_TYP - 1):
@@ -104,6 +157,8 @@ prefix = f'mix_match_{mn.curr_timestamp()}/'
 model = MatchNet(N_HOS, N_TYP, num_structures, int_structures, central_s, internal_s,
                  control_strength=args.control_strength)
 
+print_misreport_differences(model, small_batch[0,0,:,:])
+
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 ashlagi_experiment.run_experiment(batches, batches, save=SAVE, verbose=True)
@@ -119,3 +174,5 @@ print('allocations on misreport ', strategic_batch_2)
 allocs = model.forward(strategic_batch_2, batch_size) @ central_s.transpose(0, 1)
 print(allocs.view(2, 7))
 visualize_match_outcome(strategic_batch_2[0], allocs)
+
+print_misreport_differences(model, small_batch[0,0,:,:])

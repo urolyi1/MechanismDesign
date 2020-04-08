@@ -49,8 +49,8 @@ def blow_up_column(col_vector, num_hospitals):
 
 def all_possible_misreports(true_bid):
     # gives iterators from 0 to max
-    all_iters = [range(i + 1) for i in true_bid]
-    results = [np.array(x) for x in itertools.product(*all_iters)]
+    all_iters = [range(int(i) + 1) for i in true_bid]
+    results = [np.array(x, dtype=np.float32) for x in itertools.product(*all_iters)]
     return results
 
 
