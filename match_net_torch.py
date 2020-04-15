@@ -106,9 +106,9 @@ def test_model_performance(test_batches, model, batch_size, N_HOS, N_TYP, misrep
 
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            util = model.calc_util(model.forward(p, batch_size), model.S)
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p, model.S)
 
-            mis_diff = (mis_util - util)  # [batch_size, n_hos]
+            mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
 
             regrets.append(mis_diff.detach())
             all_misreports[c, :, :, :] = curr_mis
@@ -175,22 +175,22 @@ def train_loop(train_batches, model, batch_size, S, N_HOS, N_TYP, net_lr=1e-2, l
             mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            util = model.calc_util(model.forward(p, batch_size), S)
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p, S)
 
             # Difference between truthful utility and best misreport util
-            mis_diff = (mis_util - util)  # [batch_size, n_hos]
+            mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
             mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
             rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
             # computes losses
             rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
             lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
-            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(util, dim=1))
+            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util, dim=1))
 
             # Add performance to lists
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
-            util_loss_lst.append(torch.mean(torch.sum(util, dim=1)).item())
+            util_loss_lst.append(torch.mean(torch.sum(central_util, dim=1)).item())
 
             # Update Lagrange multipliers every 5 iterations
             if lagr_update_counter % 5 == 0:
@@ -218,7 +218,7 @@ def train_loop(train_batches, model, batch_size, S, N_HOS, N_TYP, net_lr=1e-2, l
         print('rgt_loss', rgt_loss.item())
         print('non-quadratic regret', rgt)
         print('lagr_loss', lagr_loss.item())
-        print('mean util', torch.mean(torch.sum(util, dim=1)))
+        print('mean util', torch.mean(torch.sum(central_util, dim=1)))
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
@@ -268,14 +268,3 @@ parser.add_argument('--misreport-lr', type=float, default=.25, help='misreport l
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
 
-
-
-# parameters
-if __name__ == '__main__':
-    args = parser.parse_args()
-    np.random.seed(args.random_seed)
-    torch.manual_seed(args.random_seed)
-    two_two_experiment(args)
-    #realistic_experiment(args)
-    #ashlagi_7_type_experiment(args)
-    #ashlagi_7_type_single(args)
