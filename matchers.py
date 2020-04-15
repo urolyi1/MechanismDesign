@@ -69,9 +69,9 @@ class Matcher(nn.Module):
         Takes truthful allocation and computes utility
         INPUT
         ------
-        alloc_vec: dim [batch_size, n_possible_cycles]
+        alloc_vec: dim [batch_size, n_structures]
         p: assumed truthful bids [batch_size, n_hos, n_types]
-        S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
+        S: matrix of possible cycles [n_hos * n_types, n_structures]
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
@@ -81,6 +81,7 @@ class Matcher(nn.Module):
         # Compute matrix of number of allocated pairs shape: [batch_size, n_hos , n_types]
         allocation = (alloc_vec @ torch.transpose(S, 0, 1)).view(-1, self.n_hos, self.n_types)
 
+        # Utility received by each hospital[batch_size, n_hos]
         central_util = torch.sum(allocation, dim=-1)
 
         # For each hospital compute leftovers
@@ -137,9 +138,9 @@ class Matcher(nn.Module):
             leftovers.append(curr_hos_leftovers)
         leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
         internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
-        #counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
-        #internal_util = torch.sum(counts, dim=-1)
-        internal_util = (internal_alloc.view(batch_size, self.n_hos, -1) @ self.internalW)
+        counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
+        internal_util = torch.sum(counts, dim=-1)
+        #internal_util = (internal_alloc.view(batch_size, self.n_hos, -1) @ self.internalW)
         return central_util + internal_util  # sum utility from central mechanism and internal matching
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
