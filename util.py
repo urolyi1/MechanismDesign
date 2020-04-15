@@ -3,6 +3,23 @@ import itertools
 import numpy as np
 import torch
 
+def find_internal_two_cycles(S, n_hos, n_types):
+    """
+    Given a structures matrix finds the indices of internal structures
+    """
+
+    # iterate over all columns
+    ind_list = []
+    for col in range(S.shape[1]):
+        for h in range(n_hos):
+            internal_count = 0
+            for t in range(n_types):
+                if S[h * n_types + t, col] == 1:
+                    internal_count += 1
+            if internal_count > 1:
+                ind_list.append(col)
+                break
+    return ind_list
 
 def convert_internal_S(single_S, num_hospitals):
     """

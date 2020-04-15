@@ -13,6 +13,8 @@ from maximum_match import cvxpy_max_matching
 # this happens when the relaxed solution slightly overallocates
 # any negatives less than this will be clamped away
 NEGATIVE_TOL = 5e-1
+
+
 def valid_leftovers(minquantity, i, p, allocation):
     """
     Validates the minimum value in difference between true and allocation is
@@ -35,16 +37,17 @@ class Matcher(nn.Module):
     """
 
     def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None):
-
         super(Matcher, self).__init__()
+
+        # Initializing parameters
         self.n_hos = n_hos
         self.n_types = n_types
 
         self.S = S
         self.int_S = int_S
 
-        # creating the central matching cvxypy layer
-        self.n_structures = num_structs  # TODO: figure out how many cycles
+        # creating the central matching Cvxypy layer
+        self.n_structures = num_structs
         self.n_h_t_combos = self.n_types * self.n_hos
         self.int_structures = int_structs
 
@@ -64,54 +67,44 @@ class Matcher(nn.Module):
     def calc_util(self, alloc_vec, p, S):
         """
         Takes truthful allocation and computes utility
-
         INPUT
         ------
         alloc_vec: dim [batch_size, n_possible_cycles]
         p: assumed truthful bids [batch_size, n_hos, n_types]
         S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
-
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
         """
         batch_size = alloc_vec.shape[0]
 
-        # Use allocation vector to compute number of types from each hospital allocated
-        allocation = (alloc_vec @ torch.transpose(S, 0, 1)).view(-1, self.n_hos, self.n_types) # [batch_size, n_hos , n_types]
+        # Compute matrix of number of allocated pairs shape: [batch_size, n_hos , n_types]
+        allocation = (alloc_vec @ torch.transpose(S, 0, 1)).view(-1, self.n_hos, self.n_types)
 
-        # Central utility is the sum of all those that are allocated
         central_util = torch.sum(allocation, dim=-1)
 
-        internal_util = self.calc_internal_util(p, allocation, batch_size)
-
-        return central_util, internal_util
-
-    def calc_internal_util(self, p, alloc_counts, batch_size):
-        # Compute leftovers for each hospital
+        # For each hospital compute leftovers
         leftovers = []
         for i in range(self.n_hos):
-            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i,
-                        :]  # [batch_size, n_types]
-            minquantity = (torch.min(p[:, i, :] - allocated)).item()
-            valid_leftovers(minquantity, i, p, allocated)
+            # Check that allocation does not over allocate
+            minquantity = (torch.min(p[:, i, :] - allocation[:, i, :])).item()
+            valid_leftovers(minquantity, i, p, allocation)
 
-            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
+            # Compute leftovers as difference between allocated and true bid
+            curr_hos_leftovers = (p[:, i, :] - allocation[:, i, :]).clamp(min=0)  # [batch_size, n_types]
             leftovers.append(curr_hos_leftovers)
 
-        # stack leftovers and run internal matching
+        # Stack leftovers and run internal matchings
         leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
         internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
         #counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
         #internal_util = torch.sum(counts, dim=-1)
-
-        internal_util = internal_alloc @ self.internalW.view(self.int_structures, 1)
-        return internal_util.view(batch_size, -1)
+        internal_util = (internal_alloc.view(batch_size, self.n_hos, -1) @ self.internalW)
+        return central_util, internal_util
 
     def calc_mis_util(self, p, mis_alloc, S, mis_mask):
         """
         Takes misreport allocation and computes utility
-
         INPUT
         ------
         mis_alloc: dim [n_hos * batch_size, n_possible_cycles]
@@ -120,23 +113,33 @@ class Matcher(nn.Module):
         n_types: number of types
         mis_mask: [n_hos, 1, n_hos] all zero except in index (i, 1, i)
         internal_util: [batch_size, n_hos] utility from internal matching
-
         OUTPUT
         ------
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility from misreporting in sample 0
         """
         batch_size = int(mis_alloc.size()[0] / self.n_hos)
-        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0,
-                                                                                1)  # [n_hos, batch_size, n_hos * n_types]
+        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0, 1)  # [n_hos, batch_size, n_hos * n_types]
 
         # multiply by mask to only count misreport util
-        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types),
-                                 dim=-1) * mis_mask  # [n_hos, batch_size, n_hos]
+        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask  # [n_hos, batch_size, n_hos]
         central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
         central_util = central_util.transpose(0, 1)  # [batch_size, n_hos]
 
-        internal_util = self.calc_internal_util(p, alloc_counts, batch_size)
+        leftovers = []
+        for i in range(self.n_hos):
+            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :] # [batch_size, n_types]
 
+            # Check if there are over allocations from central mechanism
+            minquantity = (torch.min(p[:, i, :] - allocated)).item()
+            valid_leftovers(minquantity, i, p, allocated)
+
+            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
+            leftovers.append(curr_hos_leftovers)
+        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
+        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
+        #counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
+        #internal_util = torch.sum(counts, dim=-1)
+        internal_util = (internal_alloc.view(batch_size, self.n_hos, -1) @ self.internalW)
         return central_util + internal_util  # sum utility from central mechanism and internal matching
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
@@ -161,35 +164,38 @@ class Matcher(nn.Module):
         return result
 
 
-
-
 class MatchNet(Matcher):
-
-    def __init__(self, n_hos, n_types, num_structs, int_structs, S, int_S, W=None, internalW=None, control_strength=5.0):
-
+    def __init__(self, n_hos, n_types, num_structs, int_structs, S,
+                 int_S, W=None, internalW=None, control_strength=5.0):
+        # Matcher initilialization to set parameters
         super(MatchNet, self).__init__(n_hos, n_types, num_structs, int_structs, S, int_S, W=W, internalW=internalW)
         self.control_strength = control_strength
 
+        # Central linear prorgam CVXPY problem definition
         x1 = cp.Variable(self.n_structures)
         w = cp.Parameter(self.n_structures)  # structure weight
         z = cp.Parameter(self.n_structures)  # control parameter
         b = cp.Parameter(self.n_h_t_combos)  # max bid
+
         constraints = [x1 >= 0, self.S.numpy() @ x1 <= b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1) )
+        objective = cp.Maximize((w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1))
         problem = cp.Problem(objective, constraints)
 
         self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b, z], variables=[x1])
 
-        x_int = cp.Variable( self.int_structures )
-        int_w = cp.Parameter( self.int_structures )
-        int_b = cp.Parameter( self.n_types )
+        # Internal matching CVXPY problem definition
+        x_int = cp.Variable(self.int_structures)
+        int_w = cp.Parameter(self.int_structures)
+        int_b = cp.Parameter(self.n_types)
 
-        int_constraints = [x_int >= 0, self.int_S.numpy() @ x_int <= int_b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize( (int_w.T @ x_int) )
+        # constraint for positive allocation and less than true bid
+        int_constraints = [x_int >= 0, self.int_S.numpy() @ x_int <= int_b]
+        objective = cp.Maximize((int_w.T @ x_int))
         problem = cp.Problem(objective, int_constraints)
 
         self.int_layer = CvxpyLayer(problem, parameters=[int_w, int_b], variables=[x_int])
 
+        # Defining the neural network
         self.neural_net = nn.Sequential(nn.Linear(self.n_h_t_combos, 128), nn.Tanh(), nn.Linear(128, 128),
                                         nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_structures))
 
@@ -305,8 +311,8 @@ class MatchNet(Matcher):
         OUTPUT:
         x1_out: [batch_size, n_hos, n_types]
         """
-        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
-        w = torch.ones(self.n_structures).numpy() # currently weight all structurs same
+        z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types))  # [batch_size, n_structures]
+        w = torch.ones(self.n_structures).numpy() # currently weight all structures same
         x1_out = torch.zeros(batch_size, self.n_structures)
         for batch in range(batch_size):
             curr_X = X[batch].view(self.n_hos * self.n_types).detach().numpy()
@@ -328,7 +334,6 @@ class MatchNet(Matcher):
         x_1: allocation vector [batch_size, n_structures]
         """
 
-        #batch_size = X.shape[0]
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types)) # [batch_size, n_structures]
 
         x_1 = self.linear_program_forward(X, z, batch_size)
