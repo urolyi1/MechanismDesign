@@ -13,6 +13,21 @@ from maximum_match import cvxpy_max_matching
 # this happens when the relaxed solution slightly overallocates
 # any negatives less than this will be clamped away
 NEGATIVE_TOL = 5e-1
+def valid_leftovers(minquantity, i, p, allocation):
+    """
+    Validates the minimum value in difference between true and allocation is
+    above negative tolerance.
+    """
+    if minquantity <= 0:
+        try:
+            assert (abs(minquantity) < NEGATIVE_TOL)
+        except:
+            print(allocation)
+            print(p[:, i, :])
+            print(p[:, i, :] - allocation[:, i, :])
+            print(abs(minquantity))
+            assert (abs(minquantity) < NEGATIVE_TOL)
+
 
 class Matcher(nn.Module):
     """
@@ -32,14 +47,19 @@ class Matcher(nn.Module):
         self.n_structures = num_structs  # TODO: figure out how many cycles
         self.n_h_t_combos = self.n_types * self.n_hos
         self.int_structures = int_structs
+
         if W is not None:
             self.W = W
         else:
             self.W = torch.ones(self.n_structures)
+
         if internalW is not None:
             self.internalW = internalW
         else:
             self.internalW = torch.ones(self.int_structures)
+
+    def forward(self, X, batch_size):
+        raise NotImplementedError
 
     def calc_util(self, alloc_vec, p, S):
         """
@@ -56,31 +76,68 @@ class Matcher(nn.Module):
         util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility in sample 0
         """
         batch_size = alloc_vec.shape[0]
+
+        # Use allocation vector to compute number of types from each hospital allocated
         allocation = (alloc_vec @ torch.transpose(S, 0, 1)).view(-1, self.n_hos, self.n_types) # [batch_size, n_hos , n_types]
 
+        # Central utility is the sum of all those that are allocated
         central_util = torch.sum(allocation, dim=-1)
 
-
-        leftovers = []
-        for i in range(self.n_hos):
-            minquantity = (torch.min(p[:, i, :] - allocation[:, i, :])).item()
-            if minquantity <= 0:
-                try:
-                    assert (abs(minquantity) < NEGATIVE_TOL)
-                except:
-                    print(allocation)
-                    print(p[:, i, :])
-                    print(p[:, i, :] - allocation[:, i, :])
-                    print(abs(minquantity))
-                    assert (abs(minquantity) < NEGATIVE_TOL)
-            curr_hos_leftovers = (p[:, i, :] - allocation[:, i, :]).clamp(min=0)  # [batch_size, n_types]
-            leftovers.append(curr_hos_leftovers)
-        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
-        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
-        counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
-        internal_util = torch.sum(counts, dim=-1)
+        internal_util = self.calc_internal_util(p, allocation, batch_size)
 
         return central_util, internal_util
+
+    def calc_internal_util(self, p, alloc_counts, batch_size):
+        # Compute leftovers for each hospital
+        leftovers = []
+        for i in range(self.n_hos):
+            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i,
+                        :]  # [batch_size, n_types]
+            minquantity = (torch.min(p[:, i, :] - allocated)).item()
+            valid_leftovers(minquantity, i, p, allocated)
+
+            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
+            leftovers.append(curr_hos_leftovers)
+
+        # stack leftovers and run internal matching
+        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
+        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
+        #counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
+        #internal_util = torch.sum(counts, dim=-1)
+
+        internal_util = internal_alloc @ self.internalW.view(self.int_structures, 1)
+        return internal_util.view(batch_size, -1)
+
+    def calc_mis_util(self, p, mis_alloc, S, mis_mask):
+        """
+        Takes misreport allocation and computes utility
+
+        INPUT
+        ------
+        mis_alloc: dim [n_hos * batch_size, n_possible_cycles]
+        S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
+        n_hos: number of hospitals
+        n_types: number of types
+        mis_mask: [n_hos, 1, n_hos] all zero except in index (i, 1, i)
+        internal_util: [batch_size, n_hos] utility from internal matching
+
+        OUTPUT
+        ------
+        util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility from misreporting in sample 0
+        """
+        batch_size = int(mis_alloc.size()[0] / self.n_hos)
+        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0,
+                                                                                1)  # [n_hos, batch_size, n_hos * n_types]
+
+        # multiply by mask to only count misreport util
+        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types),
+                                 dim=-1) * mis_mask  # [n_hos, batch_size, n_hos]
+        central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
+        central_util = central_util.transpose(0, 1)  # [batch_size, n_hos]
+
+        internal_util = self.calc_internal_util(p, alloc_counts, batch_size)
+
+        return central_util + internal_util  # sum utility from central mechanism and internal matching
 
     def create_combined_misreport(self, curr_mis, true_rep, self_mask):
         """
@@ -103,55 +160,7 @@ class Matcher(nn.Module):
         result = only_mis + other_hos
         return result
 
-    def forward(self, X, batch_size):
-        raise NotImplementedError
 
-    def calc_mis_util(self, p, mis_alloc, S, mis_mask):
-        """
-        Takes misreport allocation and computes utility
-
-        INPUT
-        ------
-        mis_alloc: dim [n_hos * batch_size, n_possible_cycles]
-        S: matrix of possible cycles [n_hos * n_types, n_possible_cycles]
-        n_hos: number of hospitals
-        n_types: number of types
-        mis_mask: [n_hos, 1, n_hos] all zero except in index (i, 1, i)
-        internal_util: [batch_size, n_hos] utility from internal matching
-
-        OUTPUT
-        ------
-        util: dim [batch_size, n_hos] where util[0, 1] would be hospital 1's utility from misreporting in sample 0
-        """
-        batch_size = int(mis_alloc.size()[0] / self.n_hos)
-        alloc_counts = mis_alloc.view(self.n_hos, batch_size, -1) @ S.transpose(0, 1)  # [n_hos, batch_size, n_hos * n_types]
-
-        # multiply by mask to only count misreport util
-        central_util = torch.sum(alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types), dim=-1) * mis_mask  # [n_hos, batch_size, n_hos]
-        central_util, _ = torch.max(central_util, dim=-1, keepdim=False, out=None)
-        central_util = central_util.transpose(0, 1)  # [batch_size, n_hos]
-
-        leftovers = []
-        for i in range(self.n_hos):
-            allocated = (alloc_counts.view(self.n_hos, -1, self.n_hos, self.n_types))[i, :, i, :] # [batch_size, n_types]
-            minquantity = (torch.min(p[:, i, :] - allocated)).item()
-            if minquantity <= 0:
-                try:
-                    assert (abs(minquantity) < NEGATIVE_TOL)
-                except:
-                    print(allocated)
-                    print(p[:, i, :])
-                    print(p[:, i, :] - allocated)
-                    print(abs(minquantity))
-                    assert (abs(minquantity) < NEGATIVE_TOL)
-            curr_hos_leftovers = (p[:, i, :] - allocated).clamp(min=0)  # [batch_size, n_types]
-            leftovers.append(curr_hos_leftovers)
-        leftovers = torch.stack(leftovers, dim=1).view(-1, self.n_types)  # [batch_size * n_hos, n_types]
-        internal_alloc = self.internal_linear_prog(leftovers, leftovers.shape[0])  # [batch_size * n_hos, int_structs]
-        counts = internal_alloc.view(batch_size, self.n_hos, -1) @ torch.transpose(self.int_S, 0, 1)  # [batch_size, n_hos, n_types]
-        internal_util = torch.sum(counts, dim=-1)
-
-        return central_util + internal_util  # sum utility from central mechanism and internal matching
 
 
 class MatchNet(Matcher):
@@ -187,8 +196,6 @@ class MatchNet(Matcher):
     def save(self, filename_prefix='./'):
 
         torch.save(self.neural_net.state_dict(), filename_prefix+'matchnet.pytorch')
-
-    #n_hos, n_types, num_structs, int_structs, S, int_S, W = None, internalW = None):
         params_dict = {
             'n_hos': self.n_hos,
             'n_types': self.n_types,
@@ -199,7 +206,6 @@ class MatchNet(Matcher):
             'W': self.W,
             'internalW': self.internalW
         }
-
         with open(filename_prefix+'matchnet_classvariables.pickle', 'wb') as f:
             pickle.dump(params_dict, f)
 
@@ -248,8 +254,7 @@ class MatchNet(Matcher):
         ------
         x1_out: allocation vector [batch_size, n_structures]
         """
-
-        W = torch.ones(batch_size, self.n_structures)  # currently weight all structurs same
+        W = self.W.unsqueeze(0).repeat(batch_size, 1) # currently weight all structures same
         B = X.view(batch_size, self.n_hos * self.n_types) # max bids to make sure not over allocated
 
         # feed all parameters through cvxpy layer
@@ -269,7 +274,7 @@ class MatchNet(Matcher):
         x1_out: allocation vector [batch_size * n_hos, n_structures]
         """
 
-        W = torch.ones(batch_size, self.int_structures)
+        W = self.internalW.unsqueeze(0).repeat(batch_size, 1)
         B = X.view(batch_size, self.n_types)
 
         # feed all parameters through cvxpy layer
