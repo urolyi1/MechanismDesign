@@ -130,7 +130,7 @@ num_structures = central_s.shape[1]
 int_structures = internal_s.shape[1]
 
 # Weights matrix for central structures
-internal_weight_value = 2.2
+internal_weight_value = 2.0
 internal_inds = find_internal_two_cycles(central_s, N_HOS, N_TYP)
 
 individual_weights = torch.zeros(num_structures, N_HOS)
