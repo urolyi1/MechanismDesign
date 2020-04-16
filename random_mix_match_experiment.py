@@ -81,7 +81,7 @@ parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=1.0, help='control strength in cvxpy objective')
+parser.add_argument('--control-strength', type=float, default=10.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
 
 N_HOS = 2
@@ -93,7 +93,7 @@ hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
                gens.GenericTypeHospital(hos2_probs, 10)]
 
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
-random_batches = mn.create_train_sample(generator, num_batches=2, batch_size=2)
+random_batches = mn.create_train_sample(generator, num_batches=2, batch_size=4)
 
 batches = torch.tensor([
     [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
@@ -153,7 +153,7 @@ internal_weights = torch.ones(int_structures) * internal_weight_value
 prefix = f'mix_match_{mn.curr_timestamp()}/'
 
 model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights,
-                 internal_weights,  control_strength=args.control_strength)
+                 internal_weights, control_strength=args.control_strength)
 
 
 print_misreport_differences(model, small_batch[0,0,:,:])
@@ -169,4 +169,4 @@ visualize_match_outcome(small_batch[0], allocs)
 print(allocs.view(2, 7))
 
 
-print_misreport_differences(model, small_batch[0,0,:,:])
+print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
