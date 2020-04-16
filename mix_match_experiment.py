@@ -45,10 +45,10 @@ def print_misreport_differences(model, truthful_bids):
     for batch_ind in range(batched_misreports.shape[0]):
         curr_mis = batched_misreports[batch_ind, :, :].unsqueeze(0)
 
-        mis_input = model.create_combined_misreport(curr_mis, truthful_bids, self_mask)
+        mis_input = model.create_combined_misreport(curr_mis, truthful_bids)
         output = model.forward(mis_input, 1 * model.n_hos)
         p = truthful_bids.unsqueeze(0)
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+        mis_util = model.calc_mis_util(output, p)
 
         util = model.calc_util(model.forward(p, batch_size), model.S)
 
