@@ -39,12 +39,12 @@ def print_misreport_differences(model, truthful_bids, verbose=False):
     found_regret = False
     for batch_ind in range(batched_misreports.shape[0]):
         curr_mis = batched_misreports[batch_ind, :, :].unsqueeze(0)
-        mis_input = model.create_combined_misreport(curr_mis, truthful_bids, self_mask)
+        mis_input = model.create_combined_misreport(curr_mis, truthful_bids)
         output = model.forward(mis_input, 1 * model.n_hos)
         p = truthful_bids.unsqueeze(0)
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
+        mis_util = model.calc_mis_util(output, p)
 
-        central_util, internal_util = model.calc_util(model.forward(p, 1), p, model.S)
+        central_util, internal_util = model.calc_util(model.forward(p, 1), p)
         pos_regret = torch.clamp(mis_util - (central_util + internal_util), min=0)
         if verbose and (pos_regret > 1e-3).any().item():
             print("Misreport: ", curr_mis)
@@ -53,7 +53,6 @@ def print_misreport_differences(model, truthful_bids, verbose=False):
     print('found large positive regret: ', found_regret)
 
 def visualize_match_outcome(bids, allocation):
-
     hospital_results = allocation.detach().view(2,7)
     inds = np.arange(7)
 
@@ -75,7 +74,7 @@ def visualize_match_outcome(bids, allocation):
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=2, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=10, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=2, help='batch size')
 parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
@@ -121,30 +120,41 @@ unseen_batch = torch.tensor([
       [0.0000, 2.0, 1.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
 
+# Loading/Creating structures matrix
 internal_s = torch.tensor(np.load('type_matrix/ashlagi_7_type.npy'),
                           requires_grad=False, dtype=torch.float32)
 
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
                          requires_grad=False, dtype=torch.float32)
+num_structures = central_s.shape[1]
+int_structures = internal_s.shape[1]
 
 # Weights matrix for central structures
 internal_weight_value = 2.2
 internal_inds = find_internal_two_cycles(central_s, N_HOS, N_TYP)
-struct_weights = torch.ones(central_s.shape[1])
-struct_weights[internal_inds] *= internal_weight_value
+
+individual_weights = torch.zeros(num_structures, N_HOS)
+for h in range(N_HOS):
+    for col in range(num_structures):
+        # Check how many allocated pairs
+        allocated = central_s[h * N_TYP: (h+1) * N_TYP, col].sum().item()
+
+        # Since only two-cycles this means it is an internal match
+        if allocated > 1:
+            allocated = internal_weight_value
+        individual_weights[col, h] = allocated
+
+# total value for structures
+struct_weights = individual_weights.sum(dim=-1)
 
 # Weights matrix of internal structures
-internal_weights = torch.ones(internal_s.shape[1]) * internal_weight_value
-
-num_structures = central_s.shape[1]
-int_structures = internal_s.shape[1]
-
+internal_weights = torch.ones(int_structures) * internal_weight_value
 # Make directory and save args
 prefix = f'mix_match_{mn.curr_timestamp()}/'
 
-model = MatchNet(N_HOS, N_TYP, num_structures, int_structures,
-                 central_s, internal_s, W=struct_weights,
-                 internalW=internal_weights, control_strength=args.control_strength)
+model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights,
+                 internal_weights,  control_strength=args.control_strength)
+
 
 print_misreport_differences(model, small_batch[0,0,:,:])
 

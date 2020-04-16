@@ -39,17 +39,15 @@ class Experiment:
         batch_size = train_batches.shape[1]
 
         # Train model on training sample
-        self.train_tuple = mn.train_loop(train_batches, self.model, batch_size, self.central_S, self.n_hos,
-                                         self.n_types, net_lr=self.model_args.main_lr, main_iter=self.model_args.main_iter,
+        self.train_tuple = mn.train_loop(self.model, train_batches, net_lr=self.model_args.main_lr,
+                                         main_iter=self.model_args.main_iter,
                                          misreport_iter=self.model_args.misreport_iter,
                                          misreport_lr=self.model_args.misreport_lr, verbose=verbose)
 
         # Evaluate model on test_batches
         if test_batches is not None:
-            self.test_regrets, self.test_misreports = mn.test_model_performance(test_batches, self.model,
-                                                                                batch_size, self.n_hos, self.n_types,
-                                                                                misreport_iter=500,
-                                                                                misreport_lr=1.0)
+            self.test_regrets, self.test_misreports = mn.test_model_performance(self.model, test_batches,
+                                                                                misreport_iter=500, misreport_lr=1.0)
 
         if save:
             self.save_experiment(self.dir, train_batches, test_batches)
@@ -75,15 +73,13 @@ class Experiment:
 
 
 
-        final_train_regrets, _ = mn.test_model_performance(train_batches, self.model, batch_size,
-                                                           self.model.n_hos, self.model.n_types,
+        final_train_regrets, _ = mn.test_model_performance(self.model, train_batches,
                                                            misreport_iter=self.model_args.misreport_iter,
                                                            misreport_lr=1.0)
         if test_batches is not None:
             np.save(dir + 'test_batches.npy', test_batches.numpy())
-            test_regrets, test_misreports = mn.test_model_performance(test_batches, self.model, batch_size,
-                                                                      self.model.n_hos, self.model.n_types,
-                                                                      misreport_iter=1000, misreport_lr=1.0)
+            test_regrets, test_misreports = mn.test_model_performance(self.model, test_batches, misreport_iter=1000,
+                                                                      misreport_lr=1.0)
 
         torch.save(test_regrets, dir + 'test_batch_regrets.pytorch')
         torch.save(final_train_regrets, dir + 'train_batch_regrets.pytorch')

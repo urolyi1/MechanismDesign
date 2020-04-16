@@ -14,7 +14,7 @@ def curr_timestamp():
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
 
 
-def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=10, lr=1e-1):
+def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1):
     """
     Inner optimization to find best misreports
 
@@ -35,24 +35,23 @@ def optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, ite
     # not convinced this method is totally correct but sketches out what we want to do
     for i in range(iterations):
         # tile current best misreports into valid inputs
-        mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
-        
+        mis_input = model.create_combined_misreport(curr_mis, truthful)
+
+        # zero out gradients
         model.zero_grad()
 
         # push tiled misreports through network
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-
-        mis_util = model.calc_mis_util(p, output, model.S, mis_mask)  # FIX inputs
+        mis_util = model.calc_mis_util(output, truthful)  # FIX inputs
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
-        #print(torch.norm(curr_mis.grad))
 
         # Gradient descent
         with torch.no_grad():
             curr_mis = curr_mis + lr * curr_mis.grad
-            curr_mis = torch.max( torch.min(curr_mis, p), torch.zeros_like(curr_mis) ) # clamping misreports to be valid
+            curr_mis = torch.max(torch.min(curr_mis, truthful), torch.zeros_like(curr_mis)) # clamping misreports to be valid
         curr_mis.requires_grad_(True)
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
@@ -73,28 +72,24 @@ def create_train_sample(generator, num_batches, batch_size=16):
 
 
 
-def test_model_performance(test_batches, model, batch_size, N_HOS, N_TYP, misreport_iter=1000, misreport_lr=0.1):
-    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-
+def test_model_performance(model, test_batches, misreport_iter=1000, misreport_lr=0.1):
+    batch_size = test_batches.shape[1]
     all_misreports = test_batches.clone().detach()
     regrets = []
     for c in range(test_batches.shape[0]):
         # Truthful bid
         p = test_batches[c, :, :, :]
-
-        # Best misreport
         curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
         print('truthful bids', p)
 
-
-        curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter,
-                                       lr=misreport_lr)
+        # Optimize misreports
+        curr_mis = optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
         print('Optimized best misreport on final mechanism', curr_mis)
+
         integer_truthful = model.integer_forward(p, batch_size)
         integer_misreports = model.integer_forward(curr_mis, batch_size)
+
+        # Print integer allocations on truthful and misreport
         print('integer on truthful', integer_truthful)
         print('Integer allocation on truthful first sample', (model.S @ integer_truthful[0]).view(2,-1))
         print('integer on misreports', integer_misreports)
@@ -102,32 +97,26 @@ def test_model_performance(test_batches, model, batch_size, N_HOS, N_TYP, misrep
         print('truthful first sample', p[0])
 
         with torch.no_grad():
-            mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+            mis_input = model.create_combined_misreport(curr_mis, p)
 
             output = model.forward(mis_input, batch_size * model.n_hos)
-            mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p, model.S)
+            mis_util = model.calc_mis_util(output, p)
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
 
             mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
 
             regrets.append(mis_diff.detach())
             all_misreports[c, :, :, :] = curr_mis
 
-
         all_misreports.requires_grad_(True)
     return regrets, all_misreports
 
 
-def train_loop(train_batches, model, batch_size, S, N_HOS, N_TYP, net_lr=1e-2, lagr_lr=1.0, main_iter=50,
-               misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
-    # MASKS
-    # self_mask only has 1's for indices of form [i, :, i, :]
-    self_mask = torch.zeros(N_HOS, batch_size, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-
-    # Misreport mask that only has 1's for indices [i, :, i]
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, misreport_iter=50, misreport_lr=1.0,
+               rho=10.0, verbose=False):
+    # Getting certain model parameters
+    N_HOS = model.n_hos
+    batch_size = train_batches.shape[1]
 
     # initializing lagrange multipliers to 1
     lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
@@ -159,23 +148,24 @@ def train_loop(train_batches, model, batch_size, S, N_HOS, N_TYP, net_lr=1e-2, l
             curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
 
             # Run misreport optimization step
-            # TODO: Print better info about optimization at last starting utility vs ending utility maybe also net difference?
+            # TODO: Print better info about optimization
+            #  at last starting utility vs ending utility maybe also net difference?
 
             # Print best misreport pre-misreport optimization
             if verbose and lagr_update_counter % 5 == 0:
                 print('best misreport pre-optimization', curr_mis[0])
 
-            curr_mis = optimize_misreports(model, curr_mis, p, mis_mask, self_mask, batch_size, iterations=misreport_iter, lr=misreport_lr)
+            curr_mis = optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
             # Print best misreport post optimization
             if verbose and lagr_update_counter % 5 == 0:
                 print('best misreport post-optimization', curr_mis[0])
 
             # Calculate utility from best misreports
-            mis_input = model.create_combined_misreport(curr_mis, p, self_mask)
+            mis_input = model.create_combined_misreport(curr_mis, p)
             output = model.forward(mis_input, batch_size * model.n_hos)
-            mis_util = model.calc_mis_util(p, output, model.S, mis_mask)
-            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p, S)
+            mis_util = model.calc_mis_util(output, p)
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
 
             # Difference between truthful utility and best misreport util
             mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
