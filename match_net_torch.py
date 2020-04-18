@@ -44,14 +44,16 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
         output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
 
         # calculate utility from output only weighting utility from misreporting hospital
-        mis_util = model.calc_mis_util(output, truthful)  # FIX inputs
+        mis_util = model.calc_mis_util(output, truthful)
         mis_tot_util = torch.sum(mis_util)
         mis_tot_util.backward()
 
         # Gradient descent
         with torch.no_grad():
             curr_mis = curr_mis + lr * curr_mis.grad
-            curr_mis = torch.max(torch.min(curr_mis, truthful), torch.zeros_like(curr_mis)) # clamping misreports to be valid
+
+            # clamping misreports to be valid
+            curr_mis = torch.max(torch.min(curr_mis, truthful), torch.zeros_like(curr_mis))
         curr_mis.requires_grad_(True)
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
@@ -74,7 +76,7 @@ def create_train_sample(generator, num_batches, batch_size=16):
 
 def test_model_performance(model, test_batches, misreport_iter=1000, misreport_lr=0.1):
     batch_size = test_batches.shape[1]
-    all_misreports = test_batches.clone().detach()
+    all_misreports = test_batches.clone().detach() * 0.5
     regrets = []
     for c in range(test_batches.shape[0]):
         # Truthful bid
@@ -132,7 +134,7 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
     all_util_loss_lst = []
 
     # Initialize best misreports to just truthful
-    all_misreports = train_batches.clone().detach()
+    all_misreports = train_batches.clone().detach() * 0.5
 
     # Training loop
     for i in range(main_iter):
@@ -175,12 +177,12 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
             # computes losses
             rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
             lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
-            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util, dim=1))
+            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
 
             # Add performance to lists
             tot_loss_lst.append(total_loss.item())
             rgt_loss_lst.append(rgt_loss.item())
-            util_loss_lst.append(torch.mean(torch.sum(central_util, dim=1)).item())
+            util_loss_lst.append(torch.mean(torch.sum(central_util + internal_util, dim=1)).item())
 
             # Update Lagrange multipliers every 5 iterations
             if lagr_update_counter % 5 == 0:
@@ -208,7 +210,7 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
         print('rgt_loss', rgt_loss.item())
         print('non-quadratic regret', rgt)
         print('lagr_loss', lagr_loss.item())
-        print('mean util', torch.mean(torch.sum(central_util, dim=1)))
+        print('mean util', torch.mean(torch.sum(central_util + internal_util, dim=1)))
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 

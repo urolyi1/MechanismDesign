@@ -74,7 +74,7 @@ def visualize_match_outcome(bids, allocation):
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=10, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
 parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=2, help='batch size')
 parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
@@ -93,7 +93,7 @@ hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
                gens.GenericTypeHospital(hos2_probs, 10)]
 
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
-random_batches = mn.create_train_sample(generator, num_batches=2, batch_size=4)
+random_batches = mn.create_train_sample(generator, num_batches=2, batch_size=32)
 
 batches = torch.tensor([
     [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
@@ -130,8 +130,7 @@ num_structures = central_s.shape[1]
 int_structures = internal_s.shape[1]
 
 # Weights matrix for central structures
-internal_weight_value = 2.0
-internal_inds = find_internal_two_cycles(central_s, N_HOS, N_TYP)
+internal_weight_value = 2.1
 
 individual_weights = torch.zeros(num_structures, N_HOS)
 for h in range(N_HOS):
