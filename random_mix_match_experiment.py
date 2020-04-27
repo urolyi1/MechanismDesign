@@ -6,12 +6,14 @@ import argparse
 import HospitalGenerators as gens
 import match_net_torch as mn
 import Experiment
+import util
 from matchers import MatchNet, GreedyMatcher
 from util import convert_internal_S, all_possible_misreports, find_internal_two_cycles
 import matplotlib.pyplot as plt
 
 SAVE = False
-
+np.random.seed(0)
+torch.manual_seed(0)
 # enumerating all possible misreports.
 # against 2 single truthful reports
 # because we tile misreports, it is safe to put them 2 by 2 in batches, and compute utility on each in turn.
@@ -72,12 +74,10 @@ def visualize_match_outcome(bids, allocation):
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-
-parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
-parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=2, help='batch size')
-parser.add_argument('--nbatch', type=int, default=3, help='number of batches')
+parser.add_argument('--nbatch', type=int, default=1, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
@@ -93,32 +93,13 @@ hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
                gens.GenericTypeHospital(hos2_probs, 10)]
 
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
-random_batches = mn.create_train_sample(generator, num_batches=2, batch_size=32)
-
-batches = torch.tensor([
-    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
-        [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]],
-    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
-      [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]],
-[[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
-        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
-])
-strategic_batch_1 = torch.tensor([
-    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
-        [0.0000, 0.0, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
-])
-strategic_batch_2 = torch.tensor([
-    [[[3.0000, 0.0000, 0.0000, 0.0000, 0.0000, 3.0000, 0.0000],
-      [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
-])
+random_batches = util.create_train_sample(generator, num_batches=args.nbatch, batch_size=args.batchsize)
+print(random_batches)
 small_batch = torch.tensor([
     [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
       [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
-unseen_batch = torch.tensor([
-    [[[0.0000, 3.0000, 0.0000, 0.0000, 0.0000, 2.0000, 0.0000],
-      [0.0000, 2.0, 1.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
-])
+
 
 # Loading/Creating structures matrix
 internal_s = torch.tensor(np.load('type_matrix/ashlagi_7_type.npy'),
@@ -130,7 +111,7 @@ num_structures = central_s.shape[1]
 int_structures = internal_s.shape[1]
 
 # Weights matrix for central structures
-internal_weight_value = 2.1
+internal_weight_value = 2.0
 
 individual_weights = torch.zeros(num_structures, N_HOS)
 for h in range(N_HOS):
@@ -167,5 +148,7 @@ allocs = model.forward(small_batch, 1) @ central_s.transpose(0, 1)
 visualize_match_outcome(small_batch[0], allocs)
 print(allocs.view(2, 7))
 
-
+# Check regret of mix and match example
 print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
+
+
