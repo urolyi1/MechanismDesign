@@ -1,13 +1,7 @@
-import json
-import pickle
-
 import torch
 import torch.optim as optim
-import numpy as np
-import argparse
 from datetime import datetime
 from tqdm import tqdm as tqdm
-import matplotlib.pyplot as plt
 
 
 def curr_timestamp():
@@ -58,22 +52,6 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
 
-
-def create_train_sample(generator, num_batches, batch_size=16):
-    """
-    Generate num_batches batches and stack them into a single tensor
-
-    :param generator: hospital true bid generator
-    :param num_batches: number of batches to generate
-    :return: tensor of batches [num_batches, batch_size, n_hos, n_types]
-    """
-    batches = []
-    for i in range(num_batches):
-        batches.append(torch.tensor(next(generator.generate_report(batch_size))).float())
-    return torch.stack(batches, dim=0)
-
-
-
 def test_model_performance(model, test_batches, misreport_iter=1000, misreport_lr=0.1):
     batch_size = test_batches.shape[1]
     all_misreports = test_batches.clone().detach() * 0.5
@@ -93,9 +71,9 @@ def test_model_performance(model, test_batches, misreport_iter=1000, misreport_l
 
         # Print integer allocations on truthful and misreport
         print('integer on truthful', integer_truthful)
-        print('Integer allocation on truthful first sample', (model.S @ integer_truthful[0]).view(2,-1))
+        print('Integer allocation on truthful first sample', (model.S @ integer_truthful[0]).view(2, -1))
         print('integer on misreports', integer_misreports)
-        print('Integer allocation on misreported first sample', (model.S @ integer_misreports[0]).view(2,-1))
+        print('Integer allocation on misreported first sample', (model.S @ integer_misreports[0]).view(2, -1))
         print('truthful first sample', p[0])
 
         with torch.no_grad():
@@ -133,8 +111,7 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
     all_rgt_loss_lst = []
     all_util_loss_lst = []
 
-    # Initialize best misreports to just truthful
-    all_misreports = train_batches.clone().detach() * 0.5
+
 
     # Training loop
     for i in range(main_iter):
@@ -142,6 +119,9 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
         tot_loss_lst = []
         rgt_loss_lst = []
         util_loss_lst = []
+
+        # Initialize best misreports to just truthful
+        all_misreports = train_batches.clone().detach() * 0.5
 
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0])):
@@ -213,50 +193,4 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
         print('mean util', torch.mean(torch.sum(central_util + internal_util, dim=1)))
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
-
-
-def create_basic_plots(dir_name):
-    """
-    Creates basic plots for result of model
-
-    :param dir_name: name of directory with model
-    """
-    # load hyper parameters from json
-    with open(dir_name + 'argfile.json') as args_file:
-        args = json.load(args_file)
-
-    # load losses
-    tot_loss = np.load(dir_name + 'tot_loss.npy')
-    util_loss = np.load(dir_name + 'util_loss.npy')
-    rgt_loss = np.load(dir_name + 'rgt_loss.npy')
-    training_batches = np.load(dir_name + 'train_batches.npy')
-
-    # calculate optimal internal match mean in the batches
-    optimal_train_matching_util = 2 * training_batches.min(axis=-1).sum(axis=-1).mean()
-    optimal_test_matching_util = 2 * training_batches.min(axis=-1).sum(axis=-1).mean()
-
-    # Plot total loss and loss from regret
-    plt.figure()
-    plt.plot(np.arange(1, args['main_iter'] + 1), tot_loss.mean(axis=1), 'o--')
-    plt.plot(np.arange(1, args['main_iter'] + 1), rgt_loss.mean(axis=1), 'x--')
-    plt.legend(['Average Total loss', 'Average Regret loss'])
-
-    # Plot utility gained from matching
-    plt.figure()
-    plt.plot(np.arange(1, args['main_iter'] + 1), util_loss.mean(axis=1), 'o--')
-    plt.hlines(optimal_train_matching_util, linestyles='solid', xmin=0, xmax=args['main_iter'], color='red')
-    plt.legend(['MatchNet', 'Optimal strategy proof matching'], loc='lower right')
-
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--main-lr', type=float, default=5e-2, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=8, help='number of outer iterations')
-parser.add_argument('--init-iter', type=int, default=100, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=4, help='batch size')
-parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
-parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=.25, help='misreport learning rate')
-parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=5.0, help='control strength in cvxpy objective')
 
