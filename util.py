@@ -85,3 +85,17 @@ def internal_central_bloodtypes(num_hospitals):
         torch.tensor(internal_s, dtype=torch.float32, requires_grad=False),
         torch.tensor(central_s, dtype=torch.float32, requires_grad=False),
     )
+
+
+def create_train_sample(generator, num_batches, batch_size=16):
+    """
+    Generate num_batches batches and stack them into a single tensor
+
+    :param generator: hospital true bid generator
+    :param num_batches: number of batches to generate
+    :return: tensor of batches [num_batches, batch_size, n_hos, n_types]
+    """
+    batches = []
+    for i in range(num_batches):
+        batches.append(torch.tensor(next(generator.generate_report(batch_size))).float())
+    return torch.stack(batches, dim=0)
