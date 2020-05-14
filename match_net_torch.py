@@ -9,22 +9,15 @@ def curr_timestamp():
 
 
 def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1):
-    """
-    Inner optimization to find best misreports
+    """Otimization to find best misreports on current model
 
-    INPUT
-    ------
-    model: MatchNet object
-    curr_mis: current misreports (duplicate of truthful bids) [batch_size, n_hos, n_types]
-    p: truthful bids [batch_size, n_hos, n_types]
-    min_bids: lowest amount a hospital can misreport
-    max_mid: ceiling of hospital misreport
-    iterations: number of iterations to optimize misreports
-    lr: learning rate
-
-    OUTPUT
-    -------
-    curr_mis: current best misreport for each hospital when others report truthfully [batch_size, n_hos, n_types]
+    :param model: MatchNet object
+    :param curr_mis: current misreports (duplicate of truthful bids) [batch_size, n_hos, n_types]
+    :param truthful: truthful bids [batch_size, n_hos, n_types]
+    :param batch_size: number of samples
+    :param iterations: number of iterations to optimize misreports
+    :param lr: learning rate for gradient descent
+    :return: current best misreport for each hospital when others report truthfully [batch_size, n_hos, n_types]
     """
     # not convinced this method is totally correct but sketches out what we want to do
     for i in range(iterations):
@@ -52,7 +45,16 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
     #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
     return curr_mis.detach()
 
+
 def test_model_performance(model, test_batches, misreport_iter=1000, misreport_lr=0.1):
+    """Given a model calculate various performance metrics
+
+    :param mode: MatchNet object being tested
+    :param test_batches: batches to use when calculating performance
+    :param misreport_iter: number of iterations to optimize misreport for
+    :param misreport_lr: learning rate when advesarially optimizing misreport
+    :return: (tuple) calculated training regret, best misreports for each sample in batch
+    """
     batch_size = test_batches.shape[1]
     all_misreports = test_batches.clone().detach() * 0.5
     regrets = []
@@ -91,15 +93,33 @@ def test_model_performance(model, test_batches, misreport_iter=1000, misreport_l
         all_misreports.requires_grad_(True)
     return regrets, all_misreports
 
+def init_train_loop(model, train_batches, main_iter, net_lr=1e-2):
 
-def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, misreport_iter=50, misreport_lr=1.0,
-               rho=10.0, verbose=False):
+    batch_size = train_batches.shape[1]
+
+    # Model optimizers
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+    print('INITIAL TRAIN LOOP')
+    for i in range(main_iter):
+        for c in range(train_batches.shape[0]):
+            p = train_batches[c, :, :, :]
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+            total_loss = -1.0 * torch.mean(torch.sum(central_util + internal_util, dim=1))
+
+            # Update model weights
+            model_optim.zero_grad()
+            total_loss.backward()
+            model_optim.step()
+
+
+def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=2.0, main_iter=50,
+               misreport_iter=50, misreport_lr=1.0,rho=10.0, verbose=False):
     # Getting certain model parameters
     N_HOS = model.n_hos
     batch_size = train_batches.shape[1]
 
     # initializing lagrange multipliers to 1
-    lagr_mults = torch.ones(N_HOS)  # TODO: Maybe better initilization?
+    lagr_mults = torch.ones(N_HOS).requires_grad_(True)  # TODO: Maybe better initilization?
     lagr_update_counter = 0
 
     # Model optimizers
@@ -111,37 +131,35 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
     all_rgt_loss_lst = []
     all_util_loss_lst = []
 
-
+    # Initialize best misreports to just truthful
+    all_misreports = train_batches.clone().detach() * 0.5
 
     # Training loop
     for i in range(main_iter):
+        print("Iteration: ", i)
         # Lists to track loss over iterations
         tot_loss_lst = []
         rgt_loss_lst = []
         util_loss_lst = []
-
-        # Initialize best misreports to just truthful
-        all_misreports = train_batches.clone().detach() * 0.5
+        print('lagrange multipliers: ', lagr_mults)
 
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0])):
             # true input by batch dim [batch size, n_hos, n_types]
-            p = train_batches[c,:,:,:]
-            curr_mis = all_misreports[c,:,:,:].clone().detach().requires_grad_(True)
+            p = train_batches[c, :, :, :]
+            curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
 
             # Run misreport optimization step
             # TODO: Print better info about optimization
             #  at last starting utility vs ending utility maybe also net difference?
 
             # Print best misreport pre-misreport optimization
-            if verbose and lagr_update_counter % 5 == 0:
-                print('best misreport pre-optimization', curr_mis[0])
+            print(f'batch {c}: best misreport pre-optimization', curr_mis[0])
 
             curr_mis = optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
 
             # Print best misreport post optimization
-            if verbose and lagr_update_counter % 5 == 0:
-                print('best misreport post-optimization', curr_mis[0])
+            print(f'batch {c}: best misreport post-optimization', curr_mis[0])
 
             # Calculate utility from best misreports
             mis_input = model.create_combined_misreport(curr_mis, p)
@@ -156,7 +174,7 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
 
             # computes losses
             rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
-            lagr_loss = torch.sum(torch.mul(rgt, lagr_mults))
+            lagr_loss = torch.sum(rgt * lagr_mults)
             total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
 
             # Add performance to lists
@@ -164,8 +182,8 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
             rgt_loss_lst.append(rgt_loss.item())
             util_loss_lst.append(torch.mean(torch.sum(central_util + internal_util, dim=1)).item())
 
-            # Update Lagrange multipliers every 5 iterations
-            if lagr_update_counter % 5 == 0:
+            # Update Lagrange multipliers every iteration
+            if lagr_update_counter % 3 == 0:
                 lagr_optim.zero_grad()
                 (-lagr_loss).backward(retain_graph=True)
                 lagr_optim.step()
@@ -191,6 +209,7 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=1.0, main_iter=50, mis
         print('non-quadratic regret', rgt)
         print('lagr_loss', lagr_loss.item())
         print('mean util', torch.mean(torch.sum(central_util + internal_util, dim=1)))
+        print("---------------------- ")
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 

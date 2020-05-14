@@ -98,6 +98,7 @@ def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges)
             else:
                 hos0 = nonzero_inds[0][0]
                 hos1 = hos0
+
             # TODO: Add zero weight for crossing the bipartition.
             # Internal edge
             if hos0 == hos1:
@@ -107,9 +108,6 @@ def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges)
                 w[col] = external_weight
         weights_batch[i] = w
     return weights_batch
-
-    
-
 
 def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
     """
@@ -136,6 +134,23 @@ def cvxpy_max_matching(S_matrix, w, b, z, control_strength):
     _w.value = w
     _z.value = z
     _b.value = b
+    problem.solve(solver=cp.GUROBI)
+    return x1.value
+
+def compute_max_matching(S_matrix, w, b):
+    n_types = S_matrix.shape[0]
+    n_structures = S_matrix.shape[1]
+    x1 = cp.Variable(n_structures, integer=True)  # [n_structures, 1]
+    _s = cp.Parameter((n_types, n_structures))  # valid structures
+    _w = cp.Parameter(n_structures)  # structure weight
+    _b = cp.Parameter(n_types)  # max bid
+
+    constraints = [x1 >= 0, S_matrix.numpy() @ x1 <= b]  # constraint for positive allocation and less than true bid
+    objective = cp.Maximize((w.T @ x1))
+    problem = cp.Problem(objective, constraints)
+    _s.value = S_matrix.numpy()
+    _w.value = w
+    _b.value = b.numpy()
     problem.solve(solver=cp.GUROBI)
     return x1.value
 

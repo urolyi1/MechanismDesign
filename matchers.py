@@ -219,8 +219,9 @@ class MatchNet(Matcher):
             'int_structs': self.int_structures,
             'S': self.S,
             'int_S': self.int_S,
-            'W': self.W,
-            'internalW': self.internalW
+            'weights_matrix': self.weights_matrix,
+            'internal_weights': self.internal_weights,
+            'control_strength': self.control_strength
         }
         with open(filename_prefix+'matchnet_classvariables.pickle', 'wb') as f:
             pickle.dump(params_dict, f)
@@ -233,12 +234,11 @@ class MatchNet(Matcher):
         result = MatchNet(
             params_dict['n_hos'],
             params_dict['n_types'],
-            params_dict['n_structures'],
-            params_dict['int_structs'],
             params_dict['S'],
             params_dict['int_S'],
-            W=params_dict['W'],
-            internalW=params_dict['internalW']
+            params_dict['weights_matrix'],
+            params_dict['internal_weights'],
+            params_dict['control_strength']
         )
 
         result.neural_net.load_state_dict(torch.load(filename_prefix+'matchnet.pytorch'))
@@ -346,7 +346,11 @@ class MatchNet(Matcher):
 
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types))  # [batch_size, n_structures]
 
-        x_1 = self.linear_program_forward(X, z, batch_size)
+        try:
+            x_1 = self.linear_program_forward(X, z, batch_size)
+        except:
+            x_1 = self.linear_program_forward(X, z, batch_size)
+
         return x_1
 
 

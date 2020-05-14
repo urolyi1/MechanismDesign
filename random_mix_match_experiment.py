@@ -5,6 +5,7 @@ import argparse
 # Custom imports
 import HospitalGenerators as gens
 import match_net_torch as mn
+import maximum_match as mm
 import Experiment
 import util
 from matchers import MatchNet, GreedyMatcher
@@ -12,13 +13,30 @@ from util import convert_internal_S, all_possible_misreports, find_internal_two_
 import matplotlib.pyplot as plt
 
 SAVE = False
-np.random.seed(0)
-torch.manual_seed(0)
+np.random.seed(1500)
+torch.manual_seed(1500)
+
+
+def full_regret_check(model, test_batches, verbose=False):
+    """For each sample given batches checks all possible misreports for regret
+
+    :param model: MatchNet object
+    :param test_batches: test_samples
+    :param verbose: boolean option for verbose print output
+    :return: None
+    """
+    high_regrets = []
+    for batch in range(test_batches.shape[0]):
+        for sample in range(test_batches.shape[1]):
+            if print_misreport_differences(model, test_batches[batch, sample, :, :], verbose):
+                high_regrets.append(test_batches[batch, sample, :, :])
+    return high_regrets
+
 # enumerating all possible misreports.
 # against 2 single truthful reports
 # because we tile misreports, it is safe to put them 2 by 2 in batches, and compute utility on each in turn.
 # if one list is shorter, we can just pad it out to the other list, I think.
-def print_misreport_differences(model, truthful_bids, verbose=False):
+def print_misreport_differences(model, truthful_bids, verbose=False, tolerance=1e-2):
     p1_misreports = torch.tensor(all_possible_misreports(truthful_bids[0, :].numpy()))
     p2_misreports = torch.tensor(all_possible_misreports(truthful_bids[1, :].numpy()))
 
@@ -48,11 +66,12 @@ def print_misreport_differences(model, truthful_bids, verbose=False):
 
         central_util, internal_util = model.calc_util(model.forward(p, 1), p)
         pos_regret = torch.clamp(mis_util - (central_util + internal_util), min=0)
-        if verbose and (pos_regret > 1e-3).any().item():
+        if verbose and (pos_regret > tolerance).any().item():
             print("Misreport: ", curr_mis)
             print("Regret: ", pos_regret)
-        found_regret = found_regret or (pos_regret > 1e-3).any().item()
+        found_regret = found_regret or (pos_regret > tolerance).any().item()
     print('found large positive regret: ', found_regret)
+    return found_regret
 
 def visualize_match_outcome(bids, allocation):
     hospital_results = allocation.detach().view(2,7)
@@ -74,12 +93,12 @@ def visualize_match_outcome(bids, allocation):
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-3, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=2, help='batch size')
-parser.add_argument('--nbatch', type=int, default=1, help='number of batches')
+parser.add_argument('--batchsize', type=int, default=32, help='batch size')
+parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
+parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=10.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
@@ -94,7 +113,8 @@ hos_gen_lst = [gens.GenericTypeHospital(hos1_probs, 10),
 
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
 random_batches = util.create_train_sample(generator, num_batches=args.nbatch, batch_size=args.batchsize)
-print(random_batches)
+test_batches = util.create_train_sample(generator, num_batches=args.nbatch, batch_size=args.batchsize)
+
 small_batch = torch.tensor([
     [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
       [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
@@ -135,8 +155,8 @@ prefix = f'mix_match_{mn.curr_timestamp()}/'
 model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights,
                  internal_weights, control_strength=args.control_strength)
 
-
-print_misreport_differences(model, small_batch[0,0,:,:])
+mn.init_train_loop(model, random_batches, main_iter=20, net_lr=1e-3)
+print_misreport_differences(model, small_batch[0, 0, :, :])
 
 # Create experiment
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
@@ -151,4 +171,29 @@ print(allocs.view(2, 7))
 # Check regret of mix and match example
 print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
 
+# Exhaustive regret check on the test_batches
+high_regret_samples = full_regret_check(model, test_batches, verbose=True)
+
+compat_dict = {}
+for t in range(N_TYP):
+    compat_dict[t] = []
+    if t - 1 >= 0:
+        compat_dict[t].append(t-1)
+    if t + 1 < N_TYP:
+        compat_dict[t].append(t + 1)
+
+# Compute MATCH_PI from mix and match
+allocs_lst = []
+for batch in range(test_batches.shape[0]):
+    match_weights = mm.create_match_weights(central_s, test_batches[batch], compat_dict)  # [batch_size, n_structures]
+    matchings = []
+    for sample in range(test_batches.shape[1]):
+        max_matching = mm.compute_max_matching(central_s, match_weights[sample], test_batches[batch, sample].view(N_TYP * N_HOS))
+        matchings.append(torch.tensor(max_matching))
+    matchings = torch.stack(matchings).type(torch.float32)
+    allocs = (matchings @ central_s.T).view(-1, N_HOS, N_TYP)
+    allocs_lst.append(allocs)
+all_allocs = torch.stack(allocs_lst)
+
+visualize_match_outcome(test_batches[0, 0].unsqueeze(0), all_allocs[0, 0].view(1, -1))
 
