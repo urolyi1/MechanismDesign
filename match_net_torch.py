@@ -124,7 +124,6 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=2.0, main_iter=50,
 
     # Model optimizers
     model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
-    lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
 
     # Lists to track total loss, regret, and utility
     all_tot_loss_lst = []
@@ -182,17 +181,17 @@ def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=2.0, main_iter=50,
             rgt_loss_lst.append(rgt_loss.item())
             util_loss_lst.append(torch.mean(torch.sum(central_util + internal_util, dim=1)).item())
 
-            # Update Lagrange multipliers every iteration
-            if lagr_update_counter % 3 == 0:
-                lagr_optim.zero_grad()
-                (-lagr_loss).backward(retain_graph=True)
-                lagr_optim.step()
-            lagr_update_counter += 1
-
             # Update model weights
             model_optim.zero_grad()
             total_loss.backward()
             model_optim.step()
+
+            # Update Lagrange multipliers every 5 iterations
+            if lagr_update_counter % 5 == 0:
+                with torch.no_grad():
+                    lagr_mults += lagr_lr * lagr_mults.grad
+                    lagr_mults.grad.zero_()
+            lagr_update_counter += 1
 
             # Save current best misreport
             with torch.no_grad():

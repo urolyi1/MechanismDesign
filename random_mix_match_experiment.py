@@ -206,7 +206,7 @@ def visualize_match_outcome(bids, allocation, title=None):
 parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=32, help='batch size')
+parser.add_argument('--batchsize', type=int, default=64, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
@@ -239,7 +239,7 @@ num_structures = central_s.shape[1]
 int_structures = internal_s.shape[1]
 
 # Weights matrix for central structures
-internal_weight_value = 2.0
+internal_weight_value = 2.1
 
 individual_weights = torch.zeros(num_structures, N_HOS)
 for h in range(N_HOS):
@@ -268,6 +268,7 @@ visualize_match_outcome(small_batch[0], allocs)
 #mn.init_train_loop(model, random_batches, main_iter=20, net_lr=1e-2)
 #print_misreport_differences(model, small_batch[0, 0, :, :])
 
+
 # Create experiment
 #ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 train_tuple = train_loop(model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
@@ -277,7 +278,7 @@ train_tuple = train_loop(model, random_batches, net_lr=args.main_lr, main_iter=a
 # Visualizations
 print('allocations on batch ', small_batch)
 allocs = model.forward(small_batch, 1) @ central_s.transpose(0, 1)
-visualize_match_outcome(small_batch[0], allocs)
+#visualize_match_outcome(small_batch[0], allocs)
 print(allocs.view(2, 7))
 
 # Check regret of mix and match example
@@ -307,7 +308,7 @@ for batch in range(test_batches.shape[0]):
     allocs_lst.append(allocs)
 all_allocs = torch.stack(allocs_lst)
 
-visualize_match_outcome(test_batches[0, 0].unsqueeze(0), all_allocs[0, 0].view(1, -1))
+#visualize_match_outcome(test_batches[0, 0].unsqueeze(0), all_allocs[0, 0].view(1, -1))
 
 model_allocs = model.forward(test_batches.view(-1, 2, 7), 4*32) @ central_s.transpose(0, 1)
 print("model mean util: ", model_allocs.sum(dim=-1).mean())
