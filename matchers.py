@@ -188,7 +188,7 @@ class MatchNet(Matcher):
         b = cp.Parameter(self.n_h_t_combos)  # max bid
 
         constraints = [x1 >= 0, self.S.numpy() @ x1 <= b]  # constraint for positive allocation and less than true bid
-        objective = cp.Maximize((w.T @ x1) - self.control_strength * cp.norm(x1 - z, 1))
+        objective = cp.Maximize((w + z).T @ x1 - self.control_strength * cp.norm(x1, 2))
         problem = cp.Problem(objective, constraints)
 
         self.l_prog_layer = CvxpyLayer(problem, parameters=[w, b, z], variables=[x1])
@@ -346,10 +346,7 @@ class MatchNet(Matcher):
 
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types))  # [batch_size, n_structures]
 
-        try:
-            x_1 = self.linear_program_forward(X, z, batch_size)
-        except:
-            x_1 = self.linear_program_forward(X, z, batch_size)
+        x_1 = self.linear_program_forward(X, z, batch_size)
 
         return x_1
 

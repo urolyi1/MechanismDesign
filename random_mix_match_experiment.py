@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 import argparse
+import torch.optim as optim
+from tqdm import tqdm as tqdm
 
 # Custom imports
 import HospitalGenerators as gens
@@ -13,8 +15,116 @@ from util import convert_internal_S, all_possible_misreports, find_internal_two_
 import matplotlib.pyplot as plt
 
 SAVE = False
-np.random.seed(1500)
-torch.manual_seed(1500)
+np.random.seed(500)
+torch.manual_seed(500)
+
+VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
+small_batch = torch.tensor([
+    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
+      [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
+])
+
+def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=10.0, main_iter=50,
+               misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
+    # Getting certain model parameters
+    N_HOS = model.n_hos
+    batch_size = train_batches.shape[1]
+
+    # initializing lagrange multipliers to 1
+    lagr_mults = torch.ones(N_HOS).requires_grad_(True)  # TODO: Maybe better initilization?
+    lagr_update_counter = 0
+
+    # Model optimizers
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+    lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
+
+    # Lists to track total loss, regret, and utility
+    all_tot_loss_lst = []
+    all_rgt_loss_lst = []
+    all_util_loss_lst = []
+
+    # Initialize best misreports
+    all_misreports = train_batches.clone().detach() * 0.0
+
+    # Training loop
+    for i in range(main_iter):
+        print("Iteration: ", i)
+        # Lists to track loss over iterations
+        tot_loss_lst = []
+        rgt_loss_lst = []
+        util_loss_lst = []
+        print('lagrange multipliers: ', lagr_mults)
+        allocs = model.forward(small_batch, 1) @ central_s.transpose(0, 1)
+        visualize_match_outcome(small_batch[0], allocs, i)
+        print("neural net output: ", model.neural_net_forward(small_batch[0])[0, VALID_STRUCTURES_INDS])
+        # For each batch in training batches
+        for c in tqdm(range(train_batches.shape[0])):
+            # true input by batch dim [batch size, n_hos, n_types]
+            p = train_batches[c, :, :, :]
+            curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
+
+            # Run misreport optimization step
+            # TODO: Print better info about optimization
+            #  at last starting utility vs ending utility maybe also net difference?
+
+            # Print best misreport pre-misreport optimization
+            print(f'batch {c}: best misreport pre-optimization', curr_mis[0])
+
+            curr_mis = mn.optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
+
+            # Print best misreport post optimization
+            print(f'batch {c}: best misreport post-optimization', curr_mis[0])
+
+            # Calculate utility from best misreports
+            mis_input = model.create_combined_misreport(curr_mis, p)
+            output = model.forward(mis_input, batch_size * model.n_hos)
+            mis_util = model.calc_mis_util(output, p)
+            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+
+            # Difference between truthful utility and best misreport util
+            mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
+            mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
+            rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+            # computes losses
+            rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
+            lagr_loss = torch.sum(rgt * lagr_mults)
+            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
+
+            # Add performance to lists
+            tot_loss_lst.append(total_loss.item())
+            rgt_loss_lst.append(rgt_loss.item())
+            util_loss_lst.append(torch.mean(torch.sum(central_util + internal_util, dim=1)).item())
+
+            # Update Lagrange multipliers every iteration
+            if lagr_update_counter % 3 == 0:
+                lagr_optim.zero_grad()
+                (-lagr_loss).backward(retain_graph=True)
+                lagr_optim.step()
+            lagr_update_counter += 1
+
+            # Update model weights
+            model_optim.zero_grad()
+            total_loss.backward()
+            model_optim.step()
+
+            # Save current best misreport
+            with torch.no_grad():
+                all_misreports[c,:,:,:] = curr_mis
+            all_misreports.requires_grad_(True)
+
+        all_tot_loss_lst.append(tot_loss_lst)
+        all_rgt_loss_lst.append(rgt_loss_lst)
+        all_util_loss_lst.append(util_loss_lst)
+
+        # Print current allocations and difference between allocations and internal matching
+        print('total loss', total_loss.item())
+        print('rgt_loss', rgt_loss.item())
+        print('non-quadratic regret', rgt)
+        print('lagr_loss', lagr_loss.item())
+        print('mean util', torch.mean(torch.sum(central_util + internal_util, dim=1)))
+        print("---------------------- ")
+    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
 
 def full_regret_check(model, test_batches, verbose=False):
@@ -73,12 +183,13 @@ def print_misreport_differences(model, truthful_bids, verbose=False, tolerance=1
     print('found large positive regret: ', found_regret)
     return found_regret
 
-def visualize_match_outcome(bids, allocation):
+def visualize_match_outcome(bids, allocation, title=None):
     hospital_results = allocation.detach().view(2,7)
     inds = np.arange(7)
 
     fig, axes = plt.subplots(2)
-
+    if title:
+        fig.suptitle(title, fontsize=16)
     bar_width = 0.25
     axes[0].bar(inds, bids[0,0,:].numpy(), bar_width, color='b')
     axes[0].bar(inds + bar_width, bids[0,1,:].numpy(), bar_width, color='r')
@@ -93,14 +204,14 @@ def visualize_match_outcome(bids, allocation):
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--main-lr', type=float, default=1e-3, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=32, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=10.0, help='control strength in cvxpy objective')
+parser.add_argument('--control-strength', type=float, default=.1, help='control strength in cvxpy objective')
 args = parser.parse_args()
 
 N_HOS = 2
@@ -115,10 +226,7 @@ generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
 random_batches = util.create_train_sample(generator, num_batches=args.nbatch, batch_size=args.batchsize)
 test_batches = util.create_train_sample(generator, num_batches=args.nbatch, batch_size=args.batchsize)
 
-small_batch = torch.tensor([
-    [[[3.0000, 0.0000, 0.0000, 3.0000, 3.0000, 3.0000, 0.0000],
-      [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
-])
+
 
 
 # Loading/Creating structures matrix
@@ -153,14 +261,18 @@ internal_weights = torch.ones(int_structures) * internal_weight_value
 prefix = f'mix_match_{mn.curr_timestamp()}/'
 
 model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights,
-                 internal_weights, control_strength=args.control_strength)
+                 internal_weights, control_strength=1.0)
 
-mn.init_train_loop(model, random_batches, main_iter=20, net_lr=1e-3)
-print_misreport_differences(model, small_batch[0, 0, :, :])
+allocs = model.forward(small_batch, 1) @ central_s.transpose(0, 1)
+visualize_match_outcome(small_batch[0], allocs)
+#mn.init_train_loop(model, random_batches, main_iter=20, net_lr=1e-2)
+#print_misreport_differences(model, small_batch[0, 0, :, :])
 
 # Create experiment
-ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
-ashlagi_experiment.run_experiment(random_batches, None, save=SAVE, verbose=True)
+#ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
+train_tuple = train_loop(model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
+                         misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr, verbose=True)
+#ashlagi_experiment.run_experiment(random_batches, None, save=SAVE, verbose=True)
 
 # Visualizations
 print('allocations on batch ', small_batch)
@@ -169,7 +281,7 @@ visualize_match_outcome(small_batch[0], allocs)
 print(allocs.view(2, 7))
 
 # Check regret of mix and match example
-print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
+#print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
 
 # Exhaustive regret check on the test_batches
 high_regret_samples = full_regret_check(model, test_batches, verbose=True)
@@ -178,7 +290,7 @@ compat_dict = {}
 for t in range(N_TYP):
     compat_dict[t] = []
     if t - 1 >= 0:
-        compat_dict[t].append(t-1)
+        compat_dict[t].append(t - 1)
     if t + 1 < N_TYP:
         compat_dict[t].append(t + 1)
 
@@ -197,3 +309,6 @@ all_allocs = torch.stack(allocs_lst)
 
 visualize_match_outcome(test_batches[0, 0].unsqueeze(0), all_allocs[0, 0].view(1, -1))
 
+model_allocs = model.forward(test_batches.view(-1, 2, 7), 4*32) @ central_s.transpose(0, 1)
+print("model mean util: ", model_allocs.sum(dim=-1).mean())
+print("optimal mean util: ", all_allocs.sum(dim=-1).sum(dim=-1).mean())
