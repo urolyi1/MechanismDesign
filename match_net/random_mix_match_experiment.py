@@ -8,10 +8,9 @@ from tqdm import tqdm as tqdm
 import HospitalGenerators as gens
 import match_net_torch as mn
 import maximum_match as mm
-import Experiment
 import util
-from matchers import MatchNet, GreedyMatcher
-from util import convert_internal_S, all_possible_misreports, find_internal_two_cycles
+from matchers import MatchNet
+from util import convert_internal_S, all_possible_misreports
 import matplotlib.pyplot as plt
 
 SAVE = False

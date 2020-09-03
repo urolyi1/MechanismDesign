@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import argparse
-import datetime
 import os
 import json
 
@@ -9,7 +8,8 @@ import json
 import HospitalGenerators as gens
 import match_net_torch as mn
 import Experiment
-from matchers import MatchNet, GreedyMatcher
+import util
+from matchers import MatchNet
 from util import convert_internal_S
 
 SAVE = False
@@ -34,8 +34,8 @@ upper_lst = [[20, 40], [50, 100]]
 
 # Create generator and batches
 generator = gens.create_simple_generator(lower_lst, upper_lst, 2, 2)
-batches = mn.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
-test_batches = mn.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+batches = util.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
+test_batches = util.create_train_sample(generator, args.nbatch, batch_size=args.batchsize)
 
 
 # parameters

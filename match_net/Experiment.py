@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import itertools
 import os
 import match_net_torch as mn
 import util

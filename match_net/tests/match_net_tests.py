@@ -1,19 +1,35 @@
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 # local imports
-import match_net_torch as mn
-import Experiment
 from matchers import MatchNet
 from util import find_internal_two_cycles, convert_internal_S
 
+def visualize_match_outcome(bids, allocation, title=None):
+    hospital_results = allocation.detach().view(2,7)
+    inds = np.arange(7)
+
+    fig, axes = plt.subplots(2)
+    if title:
+        fig.suptitle(title, fontsize=16)
+    bar_width = 0.25
+    axes[0].bar(inds, bids[0,0,:].numpy(), bar_width, color='b')
+    axes[0].bar(inds + bar_width, bids[0,1,:].numpy(), bar_width, color='r')
+    axes[0].set_title('Bids')
+
+    axes[1].bar(inds, hospital_results[0,:].numpy(), bar_width, color='b')
+    axes[1].bar(inds, hospital_results[1,:].numpy(), bar_width, color='r')
+    axes[1].set_title('Allocation')
+
+    plt.show()
 
 """ Test for mix-and-match setting """
 N_HOS = 2
 N_TYP = 7
 
 # Loading/Creating structures matricies for setting
-internal_s = torch.tensor(np.load('type_matrix/ashlagi_7_type.npy'),
+internal_s = torch.tensor(np.load('../type_matrix/ashlagi_7_type.npy'),
                           requires_grad=False, dtype=torch.float32)
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
                          requires_grad=False, dtype=torch.float32)
@@ -42,7 +58,8 @@ struct_weights = individual_weights.sum(dim=-1)
 internal_weights = torch.ones(int_structures) * internal_weight_value
 
 # Creating model
-model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights, internal_weights, control_strength=1.0)
+model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights,
+                 internal_weights, control_strength=10.0)
 
 # Batches for testing
 example_batch = torch.tensor(
@@ -69,6 +86,9 @@ alloc_vec = model.forward(example_batch, batch_size).round()
 central_util, internal_util = model.calc_util(alloc_vec, truthful_batch)
 print('allocation: ', alloc_vec)
 print(f'Central Utility: {central_util}, Internal Utility: {internal_util}')
+
+allocs = alloc_vec @ central_s.transpose(0, 1)
+visualize_match_outcome(example_batch, allocs)
 
 #if not torch.eq(central_util, torch.tensor([9.6, 9.6])).all():
     #raise Exception("Central Utility Error")
@@ -105,7 +125,7 @@ print("Regret loss: ", rgt_loss)
 # Optimizing misreport
 total_iterations = 10
 lr = 1.0
-curr_mis = (example_batch * 0.5).clone().detach().requires_grad_(True)
+curr_mis = (example_batch * 0.0).clone().detach().requires_grad_(True)
 for i in range(total_iterations):
     print(f"Iteration {i}: {curr_mis}")
     # tile current best misreports into valid inputs

@@ -9,8 +9,6 @@ import Experiment
 import util
 from matchers import MatchNet
 from util import convert_internal_S, all_possible_misreports
-import maximum_match as mm
-
 
 SAVE = False
 np.random.seed(0)
@@ -81,7 +79,7 @@ def full_regret_check(model, test_batches, verbose=False):
     high_regrets = []
     for batch in range(test_batches.shape[0]):
         for sample in range(test_batches.shape[1]):
-            if print_misreport_differences(model, test_batches[batch, sample, :, :], verbose):
+            if print_misreport_differences(model, test_batches[batch, sample, :, :]):
                 high_regrets.append(test_batches[batch, sample, :, :])
     return high_regrets
 
@@ -153,3 +151,5 @@ model = MatchNet(N_HOS, N_TYP, central_s, internal_s, individual_weights, intern
 ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model)
 ashlagi_experiment.run_experiment(batches, None, save=SAVE, verbose=True)
 
+#
+high_regret = full_regret_check(model, test_batches)
