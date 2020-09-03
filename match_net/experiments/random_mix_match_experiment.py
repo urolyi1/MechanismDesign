@@ -229,7 +229,7 @@ test_batches = util.create_train_sample(generator, num_batches=args.nbatch, batc
 
 
 # Loading/Creating structures matrix
-internal_s = torch.tensor(np.load('type_matrix/ashlagi_7_type.npy'),
+internal_s = torch.tensor(np.load('../type_matrix/ashlagi_7_type.npy'),
                           requires_grad=False, dtype=torch.float32)
 
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
