@@ -9,7 +9,7 @@ import HospitalGenerators as gens
 import match_net_torch as mn
 import maximum_match as mm
 import util
-from matchers import MatchNet
+from match_net.match_net import MatchNet
 from util import convert_internal_S, all_possible_misreports
 import matplotlib.pyplot as plt
 

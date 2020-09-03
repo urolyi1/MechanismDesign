@@ -9,7 +9,6 @@ from cvxpylayers.torch import CvxpyLayer
 from matchers import Matcher
 from maximum_match import cvxpy_max_matching
 
-
 class MatchNet(Matcher):
     def __init__(self, n_hos, n_types, central_s, internal_s, weights_matrix, internal_weights, control_strength=5.0):
         # Matcher initialization to set parameters
