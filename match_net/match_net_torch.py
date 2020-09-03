@@ -81,7 +81,6 @@ def test_model_performance(model, test_batches, misreport_iter=1000, misreport_l
 
         with torch.no_grad():
             mis_input = model.create_combined_misreport(curr_mis, p)
-
             output = model.forward(mis_input, batch_size * model.n_hos)
             mis_util = model.calc_mis_util(output, p)
             central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
@@ -111,6 +110,7 @@ def init_train_loop(model, train_batches, main_iter, net_lr=1e-2):
             model_optim.zero_grad()
             total_loss.backward()
             model_optim.step()
+
 
 def single_train_step(
     model, p, curr_mis, batch_size, model_optim,
@@ -160,7 +160,7 @@ def train_loop(
     batch_size = train_batches.shape[1]
 
     # initializing lagrange multipliers to 1
-    lagr_mults = torch.ones(N_HOS).requires_grad_(True)  # TODO: Maybe better initilization?
+    lagr_mults = torch.ones(N_HOS).requires_grad_(True)
     lagr_update_counter = 0
 
     # Model optimizers
@@ -207,7 +207,7 @@ def train_loop(
 
             # Save current best misreport
             with torch.no_grad():
-                all_misreports[c,:,:,:] = curr_mis
+                all_misreports[c, :, :, :] = curr_mis
             all_misreports.requires_grad_(True)
 
         all_tot_loss_lst.append(tot_loss_lst)

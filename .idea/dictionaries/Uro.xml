@@ -2,6 +2,7 @@
   <dictionary name="Uro">
     <words>
       <w>cvxpy</w>
+      <w>lagr</w>
     </words>
   </dictionary>
 </component>

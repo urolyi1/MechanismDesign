@@ -139,7 +139,7 @@ for i in range(1, N_TYP - 1):
 ashlagi_compat_dict[0] = [1]
 ashlagi_compat_dict[N_TYP - 1] = [N_TYP - 2]
 
-internal_s = torch.tensor(np.load('../type_matrix/ashlagi_7_type.npy'),
+internal_s = torch.tensor(np.load('type_matrix/ashlagi_7_type.npy'),
                           requires_grad=False, dtype=torch.float32)
 
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),

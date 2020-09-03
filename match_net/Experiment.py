@@ -5,13 +5,12 @@ import match_net_torch as mn
 import util
 
 
-
 class Experiment:
     def __init__(self, args, internal_S, n_hos, n_types, model, dir='results/'):
         """
         Initialize Experiment
 
-        :param args: model argument
+        :param args: model arguments
         :param internal_S: Structure matrix for internal matches
         :param n_hos: number of hospitals
         :param n_types: number of types
@@ -70,11 +69,12 @@ class Experiment:
         self.model.save(filename_prefix=dir)
         np.save(dir + 'train_batches.npy', train_batches.numpy())
 
+        final_train_regrets, _ = mn.test_model_performance(
+            self.model, train_batches,
+            misreport_iter=self.model_args.misreport_iter,
+            misreport_lr=1.0
+        )
 
-
-        final_train_regrets, _ = mn.test_model_performance(self.model, train_batches,
-                                                           misreport_iter=self.model_args.misreport_iter,
-                                                           misreport_lr=1.0)
         if test_batches is not None:
             np.save(dir + 'test_batches.npy', test_batches.numpy())
             test_regrets, test_misreports = mn.test_model_performance(self.model, test_batches, misreport_iter=1000,

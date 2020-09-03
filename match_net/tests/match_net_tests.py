@@ -29,7 +29,7 @@ N_HOS = 2
 N_TYP = 7
 
 # Loading/Creating structures matricies for setting
-internal_s = torch.tensor(np.load('../type_matrix/ashlagi_7_type.npy'),
+internal_s = torch.tensor(np.load('../experiments/type_matrix/ashlagi_7_type.npy'),
                           requires_grad=False, dtype=torch.float32)
 central_s = torch.tensor(convert_internal_S(internal_s.numpy(), N_HOS),
                          requires_grad=False, dtype=torch.float32)
