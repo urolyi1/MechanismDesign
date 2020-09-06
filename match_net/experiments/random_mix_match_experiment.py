@@ -5,10 +5,10 @@ import torch.optim as optim
 from tqdm import tqdm as tqdm
 
 # Custom imports
-import HospitalGenerators as gens
-import match_net_torch as mn
-import maximum_match as mm
-import util
+from match_net import HospitalGenerators as gens
+from match_net import match_net_torch as mn
+from match_net import maximum_match as mm
+from match_net import util
 from match_net.match_net import MatchNet
 from util import convert_internal_S, all_possible_misreports
 import matplotlib.pyplot as plt
