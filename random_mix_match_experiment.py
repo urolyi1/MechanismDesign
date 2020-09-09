@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 # Custom imports
 import match_net.HospitalGenerators as gens
 import match_net.match_net_torch as mn
-import maximum_match as mm
+import match_net.maximum_match as mm
 import match_net.util as util
 from match_net.match_net import MatchNet
-from util import convert_internal_S, all_possible_misreports
+from match_net.util import convert_internal_S, all_possible_misreports
 
 
 SAVE = False
