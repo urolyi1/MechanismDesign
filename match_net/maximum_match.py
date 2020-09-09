@@ -1,6 +1,6 @@
 import cvxpy as cp
 import numpy as np
-import HospitalGenerators as hg
+import match_net.HospitalGenerators as hg
 
 
 def is_blood_compat(p_type, d_type):

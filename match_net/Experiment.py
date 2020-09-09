@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 import os
-import match_net_torch as mn
-import util
+import match_net.match_net_torch as mn
+import match_net.util as util
 
 
 class Experiment:

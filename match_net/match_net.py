@@ -6,8 +6,8 @@ from torch import nn as nn
 import cvxpy as cp
 from cvxpylayers.torch import CvxpyLayer
 
-from matchers import Matcher
-from maximum_match import cvxpy_max_matching
+from match_net.matchers import Matcher
+from match_net.maximum_match import cvxpy_max_matching
 
 class MatchNet(Matcher):
     def __init__(self, n_hos, n_types, central_s, internal_s, weights_matrix, internal_weights, control_strength=5.0):

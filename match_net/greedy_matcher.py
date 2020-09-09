@@ -3,8 +3,8 @@ import numpy as np
 import torch
 from cvxpylayers.torch import CvxpyLayer
 
-from matchers import Matcher
-from maximum_match import cvxpy_max_matching
+from match_net.matchers import Matcher
+from match_net.maximum_match import cvxpy_max_matching
 
 
 class GreedyMatcher(Matcher):
