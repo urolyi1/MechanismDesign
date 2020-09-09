@@ -96,7 +96,7 @@ def create_individual_weights(num_structures, N_HOS, N_TYP):
 # Command line argument parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=40, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=64, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
