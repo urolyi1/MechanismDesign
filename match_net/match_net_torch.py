@@ -153,7 +153,7 @@ def single_train_step(
 
 def train_loop(
     model, train_batches, net_lr=1e-2, lagr_lr=2.0, main_iter=50,
-    misreport_iter=50, misreport_lr=1.0, rho=10.0
+    misreport_iter=50, misreport_lr=1.0, rho=10.0, disable=False
 ):
     # Getting certain model parameters
     N_HOS = model.n_hos
@@ -185,7 +185,7 @@ def train_loop(
         util_loss_lst = []
 
         # For each batch in training batches
-        for c in tqdm(range(train_batches.shape[0])):
+        for c in tqdm(range(train_batches.shape[0]), disable=disable):
             # true input by batch dim [batch size, n_hos, n_types]
             p = train_batches[c, :, :, :]
             curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)

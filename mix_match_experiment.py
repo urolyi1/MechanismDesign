@@ -75,6 +75,7 @@ def print_misreport_differences(model, truthful_bids, verbose=False, tolerance=1
     print('found large positive regret: ', found_regret)
     return found_regret
 
+
 def create_individual_weights(num_structures, N_HOS, N_TYP):
     """
     Create matrix of value of each structure for each hospital.
@@ -160,7 +161,7 @@ allocs = model.forward(SMALL_BATCH, 1) @ central_s.transpose(0, 1)
 # Create experiment
 #ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
 train_tuple = mn.train_loop(model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
-                         misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr, rho=10.0)
+                         misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr, rho=10.0, disable=True)
 #ashlagi_experiment.run_experiment(random_batches, None, save=SAVE, verbose=True)
 
 # Visualizations
