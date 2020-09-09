@@ -14,8 +14,8 @@ from match_net.util import convert_internal_S, all_possible_misreports
 SAVE = False
 
 # Random Seeds
-np.random.seed(500)
-torch.manual_seed(500)
+np.random.seed(0)
+torch.manual_seed(0)
 
 
 def full_regret_check(model, test_batches, verbose=False):
@@ -44,7 +44,7 @@ def print_misreport_differences(model, truthful_bids, verbose=False, tolerance=1
 
     if p1_misreports.shape[0] > p2_misreports.shape[0]:
         to_pad = truthful_bids[1, :].repeat(p1_misreports.shape[0] - p2_misreports.shape[0], 1)
-        p2_misreports = torch.cat((p2_misreports, to_pad ))
+        p2_misreports = torch.cat((p2_misreports, to_pad))
 
     elif p2_misreports.shape[0] > p1_misreports.shape[0]:
         to_pad = truthful_bids[0, :].repeat(p2_misreports.shape[0] - p1_misreports.shape[0], 1)
@@ -96,14 +96,14 @@ def create_individual_weights(num_structures, N_HOS, N_TYP):
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=40, help='number of outer iterations')
+parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
+parser.add_argument('--main-iter', type=int, default=30, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=64, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=.1, help='control strength in cvxpy objective')
+parser.add_argument('--control-strength', type=float, default=1.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
 
 VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]

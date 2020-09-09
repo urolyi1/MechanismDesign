@@ -172,7 +172,7 @@ def train_loop(
     all_util_loss_lst = []
 
     # Initialize best misreports to just truthful
-    all_misreports = train_batches.clone().detach() * 0.5
+    all_misreports = train_batches.clone().detach() * 0.0
 
     # Training loop
     for i in range(main_iter):
