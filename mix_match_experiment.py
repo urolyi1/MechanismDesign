@@ -8,7 +8,7 @@ import match_net.match_net_torch as mn
 from match_net import maximum_match as mm
 import match_net.util as util
 from match_net.match_net import MatchNet
-from util import convert_internal_S, all_possible_misreports
+from match_net.util import convert_internal_S, all_possible_misreports
 
 
 SAVE = False
@@ -126,7 +126,7 @@ SMALL_BATCH = torch.tensor([
 
 # Loading/Creating structures matrix
 internal_s = torch.tensor(
-    np.load('match_net/experiments/type_matrix/ashlagi_7_type.npy'),
+    np.load('type_matrix/ashlagi_7_type.npy'),
     requires_grad=False,
     dtype=torch.float32
 )
