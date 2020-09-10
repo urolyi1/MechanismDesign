@@ -4,11 +4,27 @@ from datetime import datetime
 from tqdm import tqdm as tqdm
 
 
+def log_all_values(values, lists):
+    """Append each value in values to corresponding list and return as tuple of lists
+
+    :param values: list of values
+    :param lists: list of lists to append values to
+    :return: tuple of lists
+    """
+    for i, val in enumerate(values):
+        lists[i].append(val)
+
+    return tuple(lists)
+
+
 def curr_timestamp():
+    """
+    :return: current time
+    """
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
 
 
-def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1):
+def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1, verbose=False):
     """Otimization to find best misreports on current model
 
     :param model: MatchNet object
@@ -17,8 +33,13 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
     :param batch_size: number of samples
     :param iterations: number of iterations to optimize misreports
     :param lr: learning rate for gradient descent
+    :param verbose: boolean to print misreports before and after optimization
     :return: current best misreport for each hospital when others report truthfully [batch_size, n_hos, n_types]
     """
+    # Print best one sample best misreport before optimization
+    if verbose:
+        print(curr_mis[0])
+
     for i in range(iterations):
         # tile current best misreports into valid inputs
         mis_input = model.create_combined_misreport(curr_mis, truthful)
@@ -41,7 +62,11 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
             # clamping misreports to be valid
             curr_mis = torch.max(torch.min(curr_mis, truthful), torch.zeros_like(curr_mis))
         curr_mis.requires_grad_(True)
-    #print(torch.sum(torch.abs(orig_mis_input - mis_input)))
+
+    # Print best one sample best misreport after optimization
+    if verbose:
+        print(curr_mis[0])
+
     return curr_mis.detach()
 
 
@@ -116,14 +141,8 @@ def single_train_step(
     model, p, curr_mis, batch_size, model_optim,
     lagr_mults, misreport_iter, misreport_lr, rho
 ):
-    # Print best misreport pre-misreport optimization
-    print(f'best misreport pre-optimization', curr_mis[0])
-
     # Run misreport optimization step
     curr_mis = optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
-
-    # Print best misreport post optimization
-    print(f'best misreport post-optimization', curr_mis[0])
 
     # Calculate utility from best misreports
     mis_input = model.create_combined_misreport(curr_mis, p)
@@ -194,9 +213,10 @@ def train_loop(
             )
 
             # Add performance to lists
-            tot_loss_lst.append(tot_loss)
-            rgt_loss_lst.append(rgt_loss)
-            util_loss_lst.append(util)
+            tot_loss_lst, rgt_loss_lst, util_loss_lst = log_all_values(
+                [tot_loss, rgt_loss, util],
+                [tot_loss_lst, rgt_loss_lst, util_loss_lst]
+            )
 
             # Update Lagrange multipliers every 5 iterations
             if lagr_update_counter % 5 == 0:
@@ -210,9 +230,10 @@ def train_loop(
                 all_misreports[c, :, :, :] = curr_mis
             all_misreports.requires_grad_(True)
 
-        all_tot_loss_lst.append(tot_loss_lst)
-        all_rgt_loss_lst.append(rgt_loss_lst)
-        all_util_loss_lst.append(util_loss_lst)
+        all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst = log_all_values(
+            [tot_loss_lst, rgt_loss_lst, util_loss_lst],
+            [all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst]
+        )
 
         # Print current allocations and difference between allocations and internal matching
         print('total loss', tot_loss)
@@ -223,3 +244,126 @@ def train_loop(
 
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
+
+def single_train_step_no_lagrange(
+    model,
+    p,
+    curr_mis,
+    batch_size,
+    model_optim,
+    misreport_iter,
+    misreport_lr,
+):
+    # Run misreport optimization step
+    curr_mis = optimize_misreports(
+        model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr, verbose=True
+    )
+
+    # Calculate utility from best misreports
+    mis_input = model.create_combined_misreport(curr_mis, p)
+    output = model.forward(mis_input, batch_size * model.n_hos)
+    mis_util = model.calc_mis_util(output, p)
+    central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+
+    # Difference between truthful utility and best misreport util
+    mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
+    mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
+    rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+    # computes losses
+    rgt_loss = torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
+    total_loss = rgt_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
+    mean_util = torch.mean(torch.sum(central_util + internal_util, dim=1))
+
+    # Update model weights
+    model_optim.zero_grad()
+    total_loss.backward()
+    model_optim.step()
+
+    # Return total loss, regret loss, and mean utility of batch
+    return total_loss.item(), rgt_loss.item(), mean_util.item()
+
+
+def train_loop_no_lagrange(
+    model,
+    train_batches,
+    net_lr=1e-2,
+    main_iter=20,
+    misreport_iter=100,
+    misreport_lr=1.0,
+    benchmark_input=None,
+    disable=False
+):
+    # Getting certain model parameters
+    batch_size = train_batches.shape[1]
+
+    # Model optimizers
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+
+    # Lists to track total loss, regret, and utility
+    all_tot_loss_lst = []
+    all_rgt_loss_lst = []
+    all_util_loss_lst = []
+
+    # Initialize best misreports to just truthful
+    all_misreports = train_batches.clone().detach() * 0.0
+
+    # Training loop
+    for i in range(main_iter):
+        print("Iteration: ", i)
+
+        # Lists to track loss over iterations
+        tot_loss_lst = []
+        rgt_loss_lst = []
+        util_loss_lst = []
+
+        # If benchmark input batch
+        if benchmark_input is not None:
+            print_allocs(model, benchmark_input)
+
+        # For each batch in training batches
+        for c in tqdm(range(train_batches.shape[0]), disable=disable):
+            # true input by batch dim [batch size, n_hos, n_types]
+            p = train_batches[c, :, :, :]
+
+            # Get current best mis reports from stored
+            curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
+
+            # Run train step
+            tot_loss, rgt_loss, util = single_train_step_no_lagrange(
+                model, p, curr_mis, batch_size, model_optim, misreport_iter, misreport_lr
+            )
+
+            # Add performance to lists
+            tot_loss_lst, rgt_loss_lst, util_loss_lst = log_all_values(
+                [tot_loss, rgt_loss, util],
+                [tot_loss_lst, rgt_loss_lst, util_loss_lst]
+            )
+
+            # Save current best misreport
+            with torch.no_grad():
+                all_misreports[c, :, :, :] = curr_mis
+            all_misreports.requires_grad_(True)
+
+        all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst = log_all_values(
+            [tot_loss_lst, rgt_loss_lst, util_loss_lst],
+            [all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst]
+        )
+
+        # Print current allocations and difference between allocations and internal matching
+        print('total loss', tot_loss)
+        print('rgt_loss', rgt_loss)
+        print('mean util', util)
+        print("----------------------")
+
+    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
+
+
+def print_allocs(input_batch, model):
+    """Runs forward pass of model with input and prints output
+
+    :param input_batch: input for model shape: [1, 1, n_hos, n_types]
+    :param model: MatchNet object
+    """
+    allocs = model.forward(input_batch, 1) @ model.S.transpose(0, 1)
+    print(allocs)
