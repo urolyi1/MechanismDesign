@@ -21,6 +21,7 @@ def find_internal_two_cycles(S, n_hos, n_types):
                 break
     return ind_list
 
+
 def convert_internal_S(single_S, num_hospitals):
     """
     Blowup a single S matrix with all possible structures between just pairs to be all possible structures
@@ -99,3 +100,101 @@ def create_train_sample(generator, num_batches, batch_size=16):
     for i in range(num_batches):
         batches.append(torch.tensor(next(generator.generate_report(batch_size))).float())
     return torch.stack(batches, dim=0)
+
+
+def create_individual_weights(central_s, internal_weight_value, num_structures, N_HOS, N_TYP):
+    """
+    Create matrix of value of each structure for each hospital.
+
+    :return: tensor of value of structure split by hospital
+    """
+
+    individual_weights = torch.zeros(num_structures, N_HOS)
+    for h in range(N_HOS):
+        for col in range(num_structures):
+            # Check how many allocated pairs
+            allocated = central_s[h * N_TYP: (h + 1) * N_TYP, col].sum().item()
+
+            # Since only two-cycles this means it is an internal match
+            if allocated > 1:
+                allocated = internal_weight_value
+            individual_weights[col, h] = allocated
+    return individual_weights
+
+def full_regret_check(model, test_batches, verbose=False):
+    """For each sample given batches checks all possible misreports for regret
+
+    :param model: MatchNet object
+    :param test_batches: test_samples
+    :param verbose: boolean option for verbose print output
+    :return: None
+    """
+    high_regrets = []
+    for batch in range(test_batches.shape[0]):
+        for sample in range(test_batches.shape[1]):
+            if all_misreport_regret(model, test_batches[batch, sample, :, :], verbose):
+                high_regrets.append(test_batches[batch, sample, :, :])
+    return high_regrets
+
+
+def all_misreport_regret(model, truthful_bids, verbose=False, tolerance=1e-2):
+    """Given truthful inputs checks checks all possible misreports and determins whether regret
+    is above the threshold for any of the misreports
+
+    :param model: MatchNet model
+    :param truthful_bids: tensor of truthful bids
+    :param verbose: boolean to print when high regret misreport if found
+    :param tolerance: threshold value that distinguishes negligible regret from high regret
+    :return:
+    """
+
+    # params
+    N_HOS = model.n_hos
+    N_TYP = model.n_types
+
+    # All possible misreports from each hospital
+    p1_misreports = torch.tensor(all_possible_misreports(truthful_bids[0, :].numpy()))
+    p2_misreports = torch.tensor(all_possible_misreports(truthful_bids[1, :].numpy()))
+
+    if p1_misreports.shape[0] > p2_misreports.shape[0]:
+        to_pad = truthful_bids[1, :].repeat(p1_misreports.shape[0] - p2_misreports.shape[0], 1)
+        p2_misreports = torch.cat((p2_misreports, to_pad))
+
+    elif p2_misreports.shape[0] > p1_misreports.shape[0]:
+        to_pad = truthful_bids[0, :].repeat(p2_misreports.shape[0] - p1_misreports.shape[0], 1)
+        p1_misreports = torch.cat((p1_misreports, to_pad))
+
+    # Combine all possible misreports
+    batched_misreports = torch.cat((p1_misreports.unsqueeze(1), p2_misreports.unsqueeze(1)), dim=1)
+
+    # given batched misreports, we want to calc mis util for each one against truthful bids
+    self_mask = torch.zeros(N_HOS, 1, N_HOS, N_TYP)
+    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
+    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
+    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
+
+    high_regret_misreports = []
+
+    # For every possible misreport check regret
+    for batch_ind in range(batched_misreports.shape[0]):
+
+        # Get specific misreport and run through model
+        curr_mis = batched_misreports[batch_ind, :, :].unsqueeze(0)
+        mis_input = model.create_combined_misreport(curr_mis, truthful_bids)
+        output = model.forward(mis_input, 1 * model.n_hos)
+        p = truthful_bids.unsqueeze(0)
+        mis_util = model.calc_mis_util(output, p)
+
+        central_util, internal_util = model.calc_util(model.forward(p, 1), p)
+        pos_regret = torch.clamp(mis_util - (central_util + internal_util), min=0)
+
+        if verbose and (pos_regret > tolerance).any().item():
+            print("Misreport: ", curr_mis)
+            print("Regret: ", pos_regret)
+            high_regret_misreports.append(curr_mis)
+
+    if verbose:
+        print('found large positive regret: ', len(high_regret_misreports) > 0)
+
+    return high_regret_misreports
+

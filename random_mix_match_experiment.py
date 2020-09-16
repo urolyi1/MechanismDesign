@@ -14,6 +14,24 @@ from match_net.match_net import MatchNet
 from match_net.util import convert_internal_S, all_possible_misreports
 
 
+def visualize_match_outcome(bids, allocation, title=None):
+    hospital_results = allocation.detach().view(2,7)
+    inds = np.arange(7)
+
+    fig, axes = plt.subplots(2)
+    if title:
+        fig.suptitle(title, fontsize=16)
+    bar_width = 0.25
+    axes[0].bar(inds, bids[0,0,:].numpy(), bar_width, color='b')
+    axes[0].bar(inds + bar_width, bids[0, 1, :].numpy(), bar_width, color='r')
+    axes[0].set_title('Bids')
+
+    axes[1].bar(inds, hospital_results[0, :].numpy(), bar_width, color='b')
+    axes[1].bar(inds, hospital_results[1, :].numpy(), bar_width, color='r')
+    axes[1].set_title('Allocation')
+
+    plt.show()
+
 SAVE = False
 np.random.seed(500)
 torch.manual_seed(500)
@@ -24,182 +42,7 @@ small_batch = torch.tensor([
       [0.0000, 3.0, 3.0000, 0.0000, 0.0000, 0.0000, 3.0000]]]
 ])
 
-def train_loop(model, train_batches, net_lr=1e-2, lagr_lr=10.0, main_iter=50,
-               misreport_iter=50, misreport_lr=1.0, rho=10.0, verbose=False):
-    # Getting certain model parameters
-    N_HOS = model.n_hos
-    batch_size = train_batches.shape[1]
 
-    # initializing lagrange multipliers to 1
-    lagr_mults = torch.ones(N_HOS).requires_grad_(True)  # TODO: Maybe better initilization?
-    lagr_update_counter = 0
-
-    # Model optimizers
-    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
-    lagr_optim = optim.SGD(params=[lagr_mults], lr=lagr_lr)
-
-    # Lists to track total loss, regret, and utility
-    all_tot_loss_lst = []
-    all_rgt_loss_lst = []
-    all_util_loss_lst = []
-
-    # Initialize best misreports
-    all_misreports = train_batches.clone().detach() * 0.0
-
-    # Training loop
-    for i in range(main_iter):
-        print("Iteration: ", i)
-        # Lists to track loss over iterations
-        tot_loss_lst = []
-        rgt_loss_lst = []
-        util_loss_lst = []
-        print('lagrange multipliers: ', lagr_mults)
-        allocs = model.forward(small_batch, 1) @ central_s.transpose(0, 1)
-        visualize_match_outcome(small_batch[0], allocs, i)
-        print("neural net output: ", model.neural_net_forward(small_batch[0])[0, VALID_STRUCTURES_INDS])
-        # For each batch in training batches
-        for c in tqdm(range(train_batches.shape[0])):
-            # true input by batch dim [batch size, n_hos, n_types]
-            p = train_batches[c, :, :, :]
-            curr_mis = all_misreports[c, :, :, :].clone().detach().requires_grad_(True)
-
-            # Run misreport optimization step
-            # TODO: Print better info about optimization
-            #  at last starting utility vs ending utility maybe also net difference?
-
-            # Print best misreport pre-misreport optimization
-            print(f'batch {c}: best misreport pre-optimization', curr_mis[0])
-
-            curr_mis = mn.optimize_misreports(model, curr_mis, p, batch_size, iterations=misreport_iter, lr=misreport_lr)
-
-            # Print best misreport post optimization
-            print(f'batch {c}: best misreport post-optimization', curr_mis[0])
-
-            # Calculate utility from best misreports
-            mis_input = model.create_combined_misreport(curr_mis, p)
-            output = model.forward(mis_input, batch_size * model.n_hos)
-            mis_util = model.calc_mis_util(output, p)
-            central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
-
-            # Difference between truthful utility and best misreport util
-            mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
-            mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
-            rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
-
-            # computes losses
-            rgt_loss = rho * torch.sum(torch.mul(rgt, rgt))
-            lagr_loss = torch.sum(rgt * lagr_mults)
-            total_loss = rgt_loss + lagr_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
-
-            # Add performance to lists
-            tot_loss_lst.append(total_loss.item())
-            rgt_loss_lst.append(rgt_loss.item())
-            util_loss_lst.append(torch.mean(torch.sum(central_util + internal_util, dim=1)).item())
-
-            # Update Lagrange multipliers every iteration
-            if lagr_update_counter % 3 == 0:
-                lagr_optim.zero_grad()
-                (-lagr_loss).backward(retain_graph=True)
-                lagr_optim.step()
-            lagr_update_counter += 1
-
-            # Update model weights
-            model_optim.zero_grad()
-            total_loss.backward()
-            model_optim.step()
-
-            # Save current best misreport
-            with torch.no_grad():
-                all_misreports[c,:,:,:] = curr_mis
-            all_misreports.requires_grad_(True)
-
-        all_tot_loss_lst.append(tot_loss_lst)
-        all_rgt_loss_lst.append(rgt_loss_lst)
-        all_util_loss_lst.append(util_loss_lst)
-
-        # Print current allocations and difference between allocations and internal matching
-        print('total loss', total_loss.item())
-        print('rgt_loss', rgt_loss.item())
-        print('non-quadratic regret', rgt)
-        print('lagr_loss', lagr_loss.item())
-        print('mean util', torch.mean(torch.sum(central_util + internal_util, dim=1)))
-        print("---------------------- ")
-    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
-
-
-def full_regret_check(model, test_batches, verbose=False):
-    """For each sample given batches checks all possible misreports for regret
-
-    :param model: MatchNet object
-    :param test_batches: test_samples
-    :param verbose: boolean option for verbose print output
-    :return: None
-    """
-    high_regrets = []
-    for batch in range(test_batches.shape[0]):
-        for sample in range(test_batches.shape[1]):
-            if print_misreport_differences(model, test_batches[batch, sample, :, :], verbose):
-                high_regrets.append(test_batches[batch, sample, :, :])
-    return high_regrets
-
-# enumerating all possible misreports.
-# against 2 single truthful reports
-# because we tile misreports, it is safe to put them 2 by 2 in batches, and compute utility on each in turn.
-# if one list is shorter, we can just pad it out to the other list, I think.
-def print_misreport_differences(model, truthful_bids, verbose=False, tolerance=1e-2):
-    p1_misreports = torch.tensor(all_possible_misreports(truthful_bids[0, :].numpy()))
-    p2_misreports = torch.tensor(all_possible_misreports(truthful_bids[1, :].numpy()))
-
-    if p1_misreports.shape[0] > p2_misreports.shape[0]:
-        to_pad = truthful_bids[1,:].repeat(p1_misreports.shape[0] - p2_misreports.shape[0], 1)
-        p2_misreports = torch.cat( (p2_misreports, to_pad ))
-
-    elif p2_misreports.shape[0] > p1_misreports.shape[0]:
-        to_pad = truthful_bids[0,:].repeat(p2_misreports.shape[0] - p1_misreports.shape[0], 1)
-        p1_misreports = torch.cat( (p1_misreports, to_pad ))
-
-    batched_misreports = torch.cat( (p1_misreports.unsqueeze(1), p2_misreports.unsqueeze(1)), dim=1)
-
-    # given batched misreports, we want to calc mis util for each one against truthful bids
-    self_mask = torch.zeros(N_HOS, 1, N_HOS, N_TYP)
-    self_mask[np.arange(N_HOS), :, np.arange(N_HOS), :] = 1.0
-    mis_mask = torch.zeros(N_HOS, 1, N_HOS)
-    mis_mask[np.arange(N_HOS), :, np.arange(N_HOS)] = 1.0
-
-    found_regret = False
-    for batch_ind in range(batched_misreports.shape[0]):
-        curr_mis = batched_misreports[batch_ind, :, :].unsqueeze(0)
-        mis_input = model.create_combined_misreport(curr_mis, truthful_bids)
-        output = model.forward(mis_input, 1 * model.n_hos)
-        p = truthful_bids.unsqueeze(0)
-        mis_util = model.calc_mis_util(output, p)
-
-        central_util, internal_util = model.calc_util(model.forward(p, 1), p)
-        pos_regret = torch.clamp(mis_util - (central_util + internal_util), min=0)
-        if verbose and (pos_regret > tolerance).any().item():
-            print("Misreport: ", curr_mis)
-            print("Regret: ", pos_regret)
-        found_regret = found_regret or (pos_regret > tolerance).any().item()
-    print('found large positive regret: ', found_regret)
-    return found_regret
-
-def visualize_match_outcome(bids, allocation, title=None):
-    hospital_results = allocation.detach().view(2,7)
-    inds = np.arange(7)
-
-    fig, axes = plt.subplots(2)
-    if title:
-        fig.suptitle(title, fontsize=16)
-    bar_width = 0.25
-    axes[0].bar(inds, bids[0,0,:].numpy(), bar_width, color='b')
-    axes[0].bar(inds + bar_width, bids[0,1,:].numpy(), bar_width, color='r')
-    axes[0].set_title('Bids')
-
-    axes[1].bar(inds, hospital_results[0,:].numpy(), bar_width, color='b')
-    axes[1].bar(inds, hospital_results[1,:].numpy(), bar_width, color='r')
-    axes[1].set_title('Allocation')
-
-    plt.show()
 
 
 # Command line argument parser
@@ -271,8 +114,10 @@ visualize_match_outcome(small_batch[0], allocs)
 
 # Create experiment
 #ashlagi_experiment = Experiment.Experiment(args, internal_s, N_HOS, N_TYP, model, dir=prefix)
-train_tuple = train_loop(model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
-                         misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr, verbose=True)
+train_tuple = mn.train_loop(
+    model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
+    misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr, verbose=True
+)
 #ashlagi_experiment.run_experiment(random_batches, None, save=SAVE, verbose=True)
 
 # Visualizations
@@ -285,7 +130,7 @@ print(allocs.view(2, 7))
 #print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
 
 # Exhaustive regret check on the test_batches
-high_regret_samples = full_regret_check(model, test_batches, verbose=True)
+high_regret_samples = util.full_regret_check(model, test_batches, verbose=True)
 
 compat_dict = {}
 for t in range(N_TYP):

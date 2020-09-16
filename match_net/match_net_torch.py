@@ -38,7 +38,7 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
     """
     # Print best one sample best misreport before optimization
     if verbose:
-        print(curr_mis[0])
+        print("Misreport Pre-Optimization: ", curr_mis[0])
 
     for i in range(iterations):
         # tile current best misreports into valid inputs
@@ -65,7 +65,7 @@ def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr
 
     # Print best one sample best misreport after optimization
     if verbose:
-        print(curr_mis[0])
+        print("Misreport Post-Optimization: ", curr_mis[0])
 
     return curr_mis.detach()
 
@@ -172,7 +172,7 @@ def single_train_step(
 
 def train_loop(
     model, train_batches, net_lr=1e-2, lagr_lr=2.0, main_iter=50,
-    misreport_iter=50, misreport_lr=1.0, rho=10.0, disable=False
+    misreport_iter=50, misreport_lr=1.0, rho=10.0, benchmark_input=None, disable=False
 ):
     # Getting certain model parameters
     N_HOS = model.n_hos
@@ -197,6 +197,10 @@ def train_loop(
     for i in range(main_iter):
         print("Iteration: ", i)
         print('lagrange multipliers: ', lagr_mults)
+
+        # If benchmark input batch
+        if benchmark_input is not None:
+            print_allocs(benchmark_input, model)
 
         # Lists to track loss over iterations
         tot_loss_lst = []
@@ -319,7 +323,7 @@ def train_loop_no_lagrange(
 
         # If benchmark input batch
         if benchmark_input is not None:
-            print_allocs(model, benchmark_input)
+            print_allocs(benchmark_input, model)
 
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0]), disable=disable):
@@ -366,4 +370,4 @@ def print_allocs(input_batch, model):
     :param model: MatchNet object
     """
     allocs = model.forward(input_batch, 1) @ model.S.transpose(0, 1)
-    print(allocs)
+    print("Allocation on benchmark input: ", allocs.round().view(model.n_hos, model.n_types))

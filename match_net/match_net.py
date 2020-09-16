@@ -157,13 +157,13 @@ class MatchNet(Matcher):
         x1_out: [batch_size, n_hos, n_types]
         """
         z = self.neural_net_forward(X.view(-1, self.n_hos * self.n_types))  # [batch_size, n_structures]
-        w = self.internal_weights.numpy()# currently weight all structures same
+        w = self.internal_weights.numpy()  # currently weight all structures same
         x1_out = torch.zeros(batch_size, self.n_structures)
         for batch in range(batch_size):
             curr_X = X[batch].view(self.n_hos * self.n_types).detach().numpy()
             curr_z = z[batch].detach().numpy()
             resulting_vals = cvxpy_max_matching(self.S.numpy(), w, curr_X, curr_z, self.control_strength)
-            x1_out[batch,:] = torch.tensor(resulting_vals)
+            x1_out[batch, :] = torch.tensor(resulting_vals)
         return x1_out
 
     def forward(self, X, batch_size):
