@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import argparse
+import time
 
 # Custom imports
 import match_net.HospitalGenerators as gens
@@ -11,6 +12,9 @@ from match_net.match_net import MatchNet
 from match_net.util import convert_internal_S, all_possible_misreports
 
 SAVE = False
+
+# Start time
+start_time = time.time()
 
 # Random Seeds
 np.random.seed(0)
@@ -34,8 +38,8 @@ N_TYP = 7
 HOS1_PROBS = [0.25, 0, 0, 0.25, 0.25, 0.25, 0]
 HOS2_PROBS = [0, 0.33, 0.33, 0, 0, 0, 0.34]
 
-hos_gen_lst = [gens.GenericTypeHospital(HOS1_PROBS, 12),
-               gens.GenericTypeHospital(HOS2_PROBS, 9)]
+hos_gen_lst = [gens.GenericTypeHospital(HOS1_PROBS, 8),
+               gens.GenericTypeHospital(HOS2_PROBS, 6)]
 
 # Generating training and test batches
 generator = gens.ReportGenerator(hos_gen_lst, (N_HOS, N_TYP))
@@ -118,8 +122,15 @@ for batch in range(test_batches.shape[0]):
 all_allocs = torch.stack(allocs_lst)
 
 model_allocs = model.forward(
-    test_batches.view(-1, N_HOS, N_TYP), args.nbatch * args.batch_size
+    test_batches.view(-1, N_HOS, N_TYP), args.nbatch * args.batchsize
 ) @ central_s.transpose(0, 1)
 
 print("model mean util: ", model_allocs.sum(dim=-1).mean())
 print("optimal mean util: ", all_allocs.sum(dim=-1).sum(dim=-1).mean())
+
+# Start time
+end_time = time.time()
+hours = (end_time - start_time) // 3600
+mins =  ((end_time - start_time) % 3600) // 60
+secs = ((end_time - start_time) % 60)
+print(f'Hours: {hours}, Minutes: {mins}, Seconds: {secs}')
