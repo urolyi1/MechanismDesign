@@ -22,14 +22,14 @@ start_time = time.time()
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=32, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
-parser.add_argument('--control-strength', type=float, default=0.2, help='control strength in cvxpy objective')
+parser.add_argument('--control-strength', type=float, default=1.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
 
 VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
