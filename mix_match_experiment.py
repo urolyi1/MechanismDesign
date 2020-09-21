@@ -98,7 +98,7 @@ mn.print_allocs(SMALL_BATCH, model)
 #print_misreport_differences(model, small_batch[0,0,:,:], verbose=True)
 
 # Exhaustive regret check on the test_batches
-high_regret_samples = util.full_regret_check(model, test_batches, verbose=True)
+high_regret_samples = util.full_regret_check(model, test_batches, verbose=False)
 
 compat_dict = {}
 for t in range(N_TYP):

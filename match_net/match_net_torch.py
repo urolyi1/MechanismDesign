@@ -3,6 +3,8 @@ import torch.optim as optim
 from datetime import datetime
 from tqdm import tqdm as tqdm
 
+from match_net import util
+
 
 def log_all_values(values, lists):
     """Append each value in values to corresponding list and return as tuple of lists
@@ -22,6 +24,20 @@ def curr_timestamp():
     :return: current time
     """
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
+
+
+def find_best_misreports(model, truthful):
+    """Only for the two hospital case
+
+    :param model: MatchNet object
+    :param truthful: truthful bids [batch_size, n_hos, n_types]
+    :param batch_size: batch size
+    """
+    best_misreports = []
+    for sample_idx in range(truthful.shape[0]):
+        misreport_lst, misreport_vals = util.all_misreport_regret(model, truthful_bids=truthful[sample_idx])
+        best_misreports.append(torch.cat(misreport_lst, dim=0).unsqueeze(0))
+    return torch.cat(best_misreports, dim=0)
 
 
 def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1, verbose=False):
