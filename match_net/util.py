@@ -122,7 +122,7 @@ def create_individual_weights(central_s, internal_weight_value, num_structures, 
     return individual_weights
 
 
-def full_regret_check(model, test_batches, verbose=False):
+def full_regret_check(model, test_batches, verbose=False, tolerance=1e-2):
     """For each sample given batches checks all possible misreports for regret
 
     :param model: MatchNet object
@@ -133,8 +133,13 @@ def full_regret_check(model, test_batches, verbose=False):
     high_regrets = []
     for batch in range(test_batches.shape[0]):
         for sample in range(test_batches.shape[1]):
-            if all_misreport_regret(model, test_batches[batch, sample, :, :], verbose):
-                high_regrets.append(test_batches[batch, sample, :, :])
+            misreport_lst, misreport_vals = all_misreport_regret(
+                model, test_batches[batch, sample, :, :], verbose, tolerance=tolerance
+            )
+            for i, val in enumerate(misreport_vals):
+                if val > tolerance:
+                    high_regrets.append(test_batches[batch, sample, :, :])
+                    break
     return high_regrets
 
 def create_masks(N_HOS, N_TYP):
