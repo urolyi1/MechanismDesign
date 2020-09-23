@@ -315,6 +315,7 @@ def train_loop_no_lagrange(
     benchmark_input=None,
     disable=False
 ):
+    VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
     # Getting certain model parameters
     batch_size = train_batches.shape[1]
 
@@ -341,6 +342,7 @@ def train_loop_no_lagrange(
         # If benchmark input batch
         if benchmark_input is not None:
             print_allocs(benchmark_input, model)
+            print("Network Output: ", model.neural_net_forward(benchmark_input)[:, VALID_STRUCTURES_INDS])
 
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0]), disable=disable):
@@ -424,6 +426,7 @@ def optimal_train_loop_no_lagrange(
     benchmark_input=None,
     disable=False
 ):
+    VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
     # Getting certain model parameters
     batch_size = train_batches.shape[1]
 
@@ -447,6 +450,7 @@ def optimal_train_loop_no_lagrange(
         # If benchmark input batch
         if benchmark_input is not None:
             print_allocs(benchmark_input, model)
+            print("Network Output: ", model.neural_net_forward(benchmark_input)[:, VALID_STRUCTURES_INDS])
 
         # For each batch in training batches
         for c in tqdm(range(train_batches.shape[0]), disable=disable):
