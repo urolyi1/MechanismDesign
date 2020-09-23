@@ -9,6 +9,28 @@ from cvxpylayers.torch import CvxpyLayer
 from match_net.matchers import Matcher
 from match_net.maximum_match import cvxpy_max_matching
 
+class Misreporter(nn.Module):
+    def __init__(self, n_hos, n_types, layer_size=64, n_layers=2):
+        super(Misreporter, self).__init__()
+
+        self.n_hos = n_hos
+        self.n_types = n_types
+
+        self.net = nn.Sequential(
+            nn.Linear(self.n_hos*self.n_types, layer_size),
+            *[nn.Linear(layer_size, layer_size) for _ in range(n_layers)],
+            nn.Linear(layer_size, self.n_hos*self.n_types),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        truthful_bids = x
+        shape = x.shape
+        x = torch.flatten(x, start_dim=-2)
+        x = self.net(x)
+        x = x.view(shape)*truthful_bids # always make it a fraction of truthful
+        return x
+
 class MatchNet(Matcher):
     def __init__(self, n_hos, n_types, central_s, internal_s, weights_matrix, internal_weights, control_strength=5.0):
         # Matcher initialization to set parameters

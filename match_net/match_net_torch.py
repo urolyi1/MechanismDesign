@@ -153,6 +153,19 @@ def init_train_loop(model, train_batches, main_iter, net_lr=1e-2):
             total_loss.backward()
             model_optim.step()
 
+def optimize_algnet_misreport(model, misreporter, truthful, batch_size, misreport_optimizer, iterations=1):
+    for i in range(iterations):
+        curr_mis = misreporter(truthful)
+        mis_input = model.create_combined_misreport(curr_mis, truthful)
+        output = model.forward(mis_input.view(-1, model.n_hos * model.n_types), batch_size * model.n_hos)
+        mis_util = model.calc_mis_util(output, truthful)
+        mis_tot_util = torch.sum(mis_util)
+        misreport_optimizer.zero_grad()
+        model.zero_grad()
+        mis_tot_util.backward()
+        misreport_optimizer.step()
+    curr_mis = misreporter(truthful)
+    return curr_mis
 
 def single_train_step(
     model, p, curr_mis, batch_size, model_optim,
@@ -266,6 +279,44 @@ def train_loop(
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
 
+def single_train_step_algnet_no_lagrange(
+        model,
+        p,
+        misreporter,
+        batch_size,
+        model_optim,
+        misreport_optim,
+        misreport_iter,
+):
+    # Run misreport optimization step
+    curr_mis = optimize_algnet_misreport(
+        model, misreporter, p, batch_size, misreport_optim, iterations=misreport_iter
+    )
+
+    # Calculate utility from best misreports
+    mis_input = model.create_combined_misreport(curr_mis, p)
+    output = model.forward(mis_input, batch_size * model.n_hos)
+    mis_util = model.calc_mis_util(output, p)
+    central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+
+    # Difference between truthful utility and best misreport util
+    mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
+    mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
+    rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+    # computes losses
+    rgt_loss = torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
+    total_loss = rgt_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
+    mean_util = torch.mean(torch.sum(central_util + internal_util, dim=1))
+
+    # Update model weights
+    model_optim.zero_grad()
+    total_loss.backward()
+    model_optim.step()
+
+    # Return total loss, regret loss, and mean utility of batch
+    return total_loss.item(), rgt_loss.item(), mean_util.item()
+
 def single_train_step_no_lagrange(
     model,
     p,
@@ -305,15 +356,73 @@ def single_train_step_no_lagrange(
     return total_loss.item(), rgt_loss.item(), mean_util.item()
 
 
+def train_loop_algnet_no_lagrange(model, misreporter, train_batches, net_lr=1e-2, main_iter=20, misreport_iter=100, misreport_lr=0.001, benchmark_input=None, disable=False ):
+    # Getting certain model parameters
+    batch_size = train_batches.shape[1]
+
+    # Model optimizers
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+    misreport_optim = optim.Adam(params=misreporter.parameters(), lr=misreport_lr)
+
+    # Lists to track total loss, regret, and utility
+    all_tot_loss_lst = []
+    all_rgt_loss_lst = []
+    all_util_loss_lst = []
+
+    # Initialize best misreports to just truthful
+
+    # Training loop
+    for i in range(main_iter):
+        print("Iteration: ", i)
+
+        # Lists to track loss over iterations
+        tot_loss_lst = []
+        rgt_loss_lst = []
+        util_loss_lst = []
+
+        # If benchmark input batch
+        if benchmark_input is not None:
+            print_allocs(benchmark_input, model)
+
+        # For each batch in training batches
+        for c in tqdm(range(train_batches.shape[0]), disable=disable):
+            # true input by batch dim [batch size, n_hos, n_types]
+            p = train_batches[c, :, :, :]
+
+            # Run train step
+            tot_loss, rgt_loss, util = single_train_step_algnet_no_lagrange(
+                model, p, misreporter, batch_size, model_optim, misreport_optim, misreport_iter
+            )
+
+            # Add performance to lists
+            tot_loss_lst, rgt_loss_lst, util_loss_lst = log_all_values(
+                [tot_loss, rgt_loss, util],
+                [tot_loss_lst, rgt_loss_lst, util_loss_lst]
+            )
+
+        all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst = log_all_values(
+            [tot_loss_lst, rgt_loss_lst, util_loss_lst],
+            [all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst]
+        )
+
+        # Print current allocations and difference between allocations and internal matching
+        print('total loss', tot_loss)
+        print('rgt_loss', rgt_loss)
+        print('mean util', util)
+        print("----------------------")
+
+    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
+
+
 def train_loop_no_lagrange(
-    model,
-    train_batches,
-    net_lr=1e-2,
-    main_iter=20,
-    misreport_iter=100,
-    misreport_lr=1.0,
-    benchmark_input=None,
-    disable=False
+        model,
+        train_batches,
+        net_lr=1e-2,
+        main_iter=20,
+        misreport_iter=100,
+        misreport_lr=1.0,
+        benchmark_input=None,
+        disable=False
 ):
     VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
     # Getting certain model parameters
