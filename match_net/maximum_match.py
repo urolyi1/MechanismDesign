@@ -84,8 +84,13 @@ def create_match_weights(central_S, batch, compat_dict, calc_edges=calc_n_edges)
     weights_batch = np.zeros((batch_size, n_structs))
     # for each sample in batch
     for i in range(batch_size):
-        w = np.zeros(n_structs)
         n_edges = calc_edges(batch[i, :, :], compat_dict)
+
+        # No valid matchings
+        if n_edges == 0:
+            continue
+
+        w = np.zeros(n_structs)
         internal_weight = n_edges + 3
         external_weight = 1 + 1 / (n_edges ** 2) + 1 / (n_edges ** (3)) * 1 / (n_edges ** (n_hos + 1))
         # for each structure in s matrix

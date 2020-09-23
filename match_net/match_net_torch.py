@@ -3,6 +3,8 @@ import torch.optim as optim
 from datetime import datetime
 from tqdm import tqdm as tqdm
 
+from match_net import util
+
 
 def log_all_values(values, lists):
     """Append each value in values to corresponding list and return as tuple of lists
@@ -22,6 +24,22 @@ def curr_timestamp():
     :return: current time
     """
     return datetime.strftime(datetime.now(), format='%Y-%m-%d_%H-%M-%S')
+
+
+def find_best_misreports(model, truthful):
+    """Only for the two hospital case
+
+    :param model: MatchNet object
+    :param truthful: truthful bids [batch_size, n_hos, n_types]
+    :return: best_misreport [batch_size, n_hos, n_types]
+    """
+    best_misreports = []
+    for sample_idx in range(truthful.shape[0]):
+        misreport_lst, misreport_vals = util.all_misreport_regret(model, truthful_bids=truthful[sample_idx])
+        best_misreports.append(torch.cat(misreport_lst, dim=0).unsqueeze(0))
+    print("Best misreport: ", best_misreports[0])
+    return torch.cat(best_misreports, dim=0)
+
 
 def optimize_misreports(model, curr_mis, truthful, batch_size, iterations=10, lr=1e-1, verbose=False):
     """Otimization to find best misreports on current model
@@ -446,6 +464,104 @@ def train_loop_no_lagrange( model, train_batches, net_lr=1e-2, main_iter=20, mis
             with torch.no_grad():
                 all_misreports[c, :, :, :] = curr_mis
             all_misreports.requires_grad_(True)
+
+        all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst = log_all_values(
+            [tot_loss_lst, rgt_loss_lst, util_loss_lst],
+            [all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst]
+        )
+
+        # Print current allocations and difference between allocations and internal matching
+        print('total loss', tot_loss)
+        print('rgt_loss', rgt_loss)
+        print('mean util', util)
+        print("----------------------")
+
+    return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
+
+
+def optimal_train_step_no_lagrange(
+    model,
+    p,
+    batch_size,
+    model_optim,
+):
+    # Run misreport optimization step
+    curr_mis = find_best_misreports(
+        model, p
+    )
+
+    # Calculate utility from best misreports
+    mis_input = model.create_combined_misreport(curr_mis, p)
+    output = model.forward(mis_input, batch_size * model.n_hos)
+    mis_util = model.calc_mis_util(output, p)
+    central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+
+    # Difference between truthful utility and best misreport util
+    mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
+    mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
+    rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
+
+    # computes losses
+    rgt_loss = torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
+    total_loss = rgt_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
+    mean_util = torch.mean(torch.sum(central_util + internal_util, dim=1))
+
+    # Update model weights
+    model_optim.zero_grad()
+    total_loss.backward()
+    model_optim.step()
+
+    # Return total loss, regret loss, and mean utility of batch
+    return total_loss.item(), rgt_loss.item(), mean_util.item()
+
+
+def optimal_train_loop_no_lagrange(
+    model,
+    train_batches,
+    net_lr=1e-2,
+    main_iter=20,
+    benchmark_input=None,
+    disable=False
+):
+    # Getting certain model parameters
+    batch_size = train_batches.shape[1]
+
+    # Model optimizers
+    model_optim = optim.Adam(params=model.parameters(), lr=net_lr)
+
+    # Lists to track total loss, regret, and utility
+    all_tot_loss_lst = []
+    all_rgt_loss_lst = []
+    all_util_loss_lst = []
+
+    # Training loop
+    for i in range(main_iter):
+        print("Iteration: ", i)
+
+        # Lists to track loss over iterations
+        tot_loss_lst = []
+        rgt_loss_lst = []
+        util_loss_lst = []
+
+        # If benchmark input batch
+        if benchmark_input is not None:
+            print_allocs(benchmark_input, model)
+
+        # For each batch in training batches
+        for c in tqdm(range(train_batches.shape[0]), disable=disable):
+            # true input by batch dim [batch size, n_hos, n_types]
+            p = train_batches[c, :, :, :]
+
+            # Run train step
+            tot_loss, rgt_loss, util = optimal_train_step_no_lagrange(
+                model, p, batch_size, model_optim
+            )
+
+            # Add performance to lists
+            tot_loss_lst, rgt_loss_lst, util_loss_lst = log_all_values(
+                [tot_loss, rgt_loss, util],
+                [tot_loss_lst, rgt_loss_lst, util_loss_lst]
+            )
 
         all_tot_loss_lst, all_rgt_loss_lst, all_util_loss_lst = log_all_values(
             [tot_loss_lst, rgt_loss_lst, util_loss_lst],
