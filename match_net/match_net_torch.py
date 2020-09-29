@@ -279,6 +279,30 @@ def train_loop(
     return train_batches, all_rgt_loss_lst, all_tot_loss_lst, all_util_loss_lst
 
 
+def exhaustive_misreport_comparison(
+    model,
+    p,
+    batch_size,
+):
+    with torch.no_grad():
+        # Run misreport optimization step
+        optimal_mis = find_best_misreports(
+            model, p
+        )
+        # Calculate utility from best misreports
+        mis_input = model.create_combined_misreport(optimal_mis, p)
+        output = model.forward(mis_input, batch_size * model.n_hos)
+        mis_util = model.calc_mis_util(output, p)
+        central_util, internal_util = model.calc_util(model.forward(p, batch_size), p)
+
+        # Difference between truthful utility and best misreport util
+        mis_diff = (mis_util - (central_util + internal_util))  # [batch_size, n_hos]
+        mis_diff = torch.max(mis_diff, torch.zeros_like(mis_diff))
+        rgt = torch.mean(mis_diff, dim=0)
+        rgt_loss = torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
+        print("optimal regret: ", rgt_loss.item())
+
+
 def single_train_step_algnet_no_lagrange(
         model,
         p,
@@ -287,6 +311,7 @@ def single_train_step_algnet_no_lagrange(
         model_optim,
         misreport_optim,
         misreport_iter,
+        exhaustive_check=False,
 ):
     # Run misreport optimization step
     curr_mis = optimize_algnet_misreport(
@@ -314,6 +339,11 @@ def single_train_step_algnet_no_lagrange(
     total_loss.backward()
     model_optim.step()
 
+    # If specified run exhaustive misreport check to compare against
+    if exhaustive_check:
+        exhaustive_misreport_comparison(model, p, batch_size)
+        print("Found Regret: ", rgt_loss.item())
+
     # Return total loss, regret loss, and mean utility of batch
     return total_loss.item(), rgt_loss.item(), mean_util.item()
 
@@ -325,6 +355,7 @@ def single_train_step_no_lagrange(
     model_optim,
     misreport_iter,
     misreport_lr,
+    exhaustive_check=False,
 ):
     # Run misreport optimization step
     curr_mis = optimize_misreports(
@@ -352,11 +383,27 @@ def single_train_step_no_lagrange(
     total_loss.backward()
     model_optim.step()
 
+    # If specified run exhaustive misreport check to compare against
+    if exhaustive_check:
+        exhaustive_misreport_comparison(model, p, batch_size)
+        print("Found Regret: ", rgt_loss.item())
+
     # Return total loss, regret loss, and mean utility of batch
     return total_loss.item(), rgt_loss.item(), mean_util.item()
 
 
-def train_loop_algnet_no_lagrange(model, misreporter, train_batches, net_lr=1e-2, main_iter=20, misreport_iter=100, misreport_lr=0.001, benchmark_input=None, disable=False ):
+def train_loop_algnet_no_lagrange(
+    model,
+    misreporter,
+    train_batches,
+    net_lr=1e-2,
+    main_iter=20,
+    misreport_iter=100,
+    misreport_lr=0.001,
+    benchmark_input=None,
+    disable=False,
+    exhaustive_check=False
+):
     # Getting certain model parameters
     batch_size = train_batches.shape[1]
 
@@ -391,7 +438,7 @@ def train_loop_algnet_no_lagrange(model, misreporter, train_batches, net_lr=1e-2
 
             # Run train step
             tot_loss, rgt_loss, util = single_train_step_algnet_no_lagrange(
-                model, p, misreporter, batch_size, model_optim, misreport_optim, misreport_iter
+                model, p, misreporter, batch_size, model_optim, misreport_optim, misreport_iter, exhaustive_check
             )
 
             # Add performance to lists
@@ -422,7 +469,8 @@ def train_loop_no_lagrange(
         misreport_iter=100,
         misreport_lr=1.0,
         benchmark_input=None,
-        disable=False
+        disable=False,
+        exhaustive_check=False,
 ):
     VALID_STRUCTURES_INDS = [1, 7, 10, 12, 16, 21]
     # Getting certain model parameters
@@ -463,7 +511,7 @@ def train_loop_no_lagrange(
 
             # Run train step
             tot_loss, rgt_loss, util = single_train_step_no_lagrange(
-                model, p, curr_mis, batch_size, model_optim, misreport_iter, misreport_lr
+                model, p, curr_mis, batch_size, model_optim, misreport_iter, misreport_lr, exhaustive_check
             )
 
             # Add performance to lists

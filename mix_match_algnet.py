@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import argparse
+import time
 
 # Custom imports
 import match_net.HospitalGenerators as gens
@@ -16,14 +17,17 @@ SAVE = False
 np.random.seed(0)
 torch.manual_seed(0)
 
+# Start time
+start_time = time.time()
+
 # Command line argument parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
+parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=1e-2, help='misreport learning rate')
+parser.add_argument('--misreport-lr', type=float, default=1e-1, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=1.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
@@ -88,7 +92,7 @@ allocs = model.forward(SMALL_BATCH, 1) @ central_s.transpose(0, 1)
 train_tuple = mn.train_loop_algnet_no_lagrange(
     model, misreporter, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
     misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr,
-    benchmark_input=SMALL_BATCH, disable=True
+    benchmark_input=SMALL_BATCH, disable=True, exhaustive_check=True
 )
 
 
@@ -128,3 +132,10 @@ model_allocs = model.forward(
 
 print("model mean util: ", model_allocs.sum(dim=-1).mean())
 print("optimal mean util: ", all_allocs.sum(dim=-1).sum(dim=-1).mean())
+
+# End time
+end_time = time.time()
+hours = (end_time - start_time) // 3600
+mins =  ((end_time - start_time) % 3600) // 60
+secs = ((end_time - start_time) % 60)
+print(f'Hours: {hours}, Minutes: {mins}, Seconds: {secs}')
