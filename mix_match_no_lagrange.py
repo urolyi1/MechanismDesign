@@ -27,7 +27,7 @@ parser.add_argument('--main-iter', type=int, default=5, help='number of outer it
 parser.add_argument('--batchsize', type=int, default=8, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
-parser.add_argument('--misreport-lr', type=float, default=10.0, help='misreport learning rate')
+parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
 parser.add_argument('--random-seed', type=int, default=0, help='random seed')
 parser.add_argument('--control-strength', type=float, default=1.0, help='control strength in cvxpy objective')
 args = parser.parse_args()
@@ -94,7 +94,7 @@ train_tuple = mn.optimal_train_loop_no_lagrange(
 train_tuple = mn.train_loop_no_lagrange(
     model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
     misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr,
-    benchmark_input=SMALL_BATCH, disable=True
+    benchmark_input=SMALL_BATCH, disable=True, exhaustive_check=True
 )
 
 
@@ -141,6 +141,6 @@ print("optimal mean util: ", all_allocs.sum(dim=-1).sum(dim=-1).mean())
 # End time
 end_time = time.time()
 hours = (end_time - start_time) // 3600
-mins =  ((end_time - start_time) % 3600) // 60
+mins = ((end_time - start_time) % 3600) // 60
 secs = ((end_time - start_time) % 60)
 print(f'Hours: {hours}, Minutes: {mins}, Seconds: {secs}')
