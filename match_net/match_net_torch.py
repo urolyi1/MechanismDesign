@@ -485,11 +485,11 @@ def train_loop_no_lagrange(
     all_rgt_loss_lst = []
     all_util_loss_lst = []
 
+    all_misreports = train_batches.clone().detach() * 0.0
 
     # Training loop
     for i in range(main_iter):
         # Initialize best misreports to just truthful
-        all_misreports = train_batches.clone().detach() * 0.0
         print("Iteration: ", i)
 
         # Lists to track loss over iterations
