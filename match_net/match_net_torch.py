@@ -356,6 +356,7 @@ def single_train_step_no_lagrange(
     misreport_iter,
     misreport_lr,
     exhaustive_check=False,
+    rho=10.0,
 ):
     # Run misreport optimization step
     curr_mis = optimize_misreports(
@@ -374,7 +375,7 @@ def single_train_step_no_lagrange(
     rgt = torch.mean(mis_diff, dim=0)  # [n_hos]
 
     # computes losses
-    rgt_loss = torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
+    rgt_loss = 10.0 * torch.sqrt(torch.sum(rgt)) + torch.sum(rgt)
     total_loss = rgt_loss - torch.mean(torch.sum(central_util + internal_util, dim=1))
     mean_util = torch.mean(torch.sum(central_util + internal_util, dim=1))
 
