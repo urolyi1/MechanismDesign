@@ -23,8 +23,8 @@ start_time = time.time()
 # Command line argument parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
-parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
-parser.add_argument('--batchsize', type=int, default=8, help='batch size')
+parser.add_argument('--main-iter', type=int, default=20, help='number of outer iterations')
+parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=4, help='number of batches')
 parser.add_argument('--misreport-iter', type=int, default=100, help='number of misreport iterations')
 parser.add_argument('--misreport-lr', type=float, default=1.0, help='misreport learning rate')
@@ -94,7 +94,7 @@ train_tuple = mn.optimal_train_loop_no_lagrange(
 train_tuple = mn.train_loop_no_lagrange(
     model, random_batches, net_lr=args.main_lr, main_iter=args.main_iter,
     misreport_iter=args.misreport_iter, misreport_lr=args.misreport_lr,
-    benchmark_input=SMALL_BATCH, disable=True, exhaustive_check=True
+    benchmark_input=SMALL_BATCH, disable=True, exhaustive_check=False,
 )
 
 

@@ -22,7 +22,7 @@ start_time = time.time()
 
 # Command line argument parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--main-lr', type=float, default=1e-1, help='main learning rate')
+parser.add_argument('--main-lr', type=float, default=1e-2, help='main learning rate')
 parser.add_argument('--main-iter', type=int, default=5, help='number of outer iterations')
 parser.add_argument('--batchsize', type=int, default=16, help='batch size')
 parser.add_argument('--nbatch', type=int, default=2, help='number of batches')
