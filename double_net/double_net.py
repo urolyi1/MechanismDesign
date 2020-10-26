@@ -4,6 +4,7 @@ from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
 
+
 class DoubleNet(nn.module):
     def __init__(self, n_agents, n_items):
         super(DoubleNet, self).__init__()
