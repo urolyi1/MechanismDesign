@@ -3,8 +3,10 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
+from double_net.sinkhorn import generate_marginals, sinkhorn_plan
 
-class DoubleNet(nn.module):
+
+class DoubleNet(nn.Module):
     def __init__(self, n_agents, n_items):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
@@ -14,6 +16,7 @@ class DoubleNet(nn.module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
         )
+        self.agents_marginal, self.items_marginal = generate_marginals(self.n_agents, self.n_items)
 
     def neural_network_forward(self, bids):
         """Augments bids in neural network
@@ -32,7 +35,26 @@ class DoubleNet(nn.module):
         :param bids: bids that will be used as edge weights [batch_size, n_agents * n_items]
         :return: allocations [batch_size, n_agents * n_items]
         """
-        return torch.zeros(bids.shape)
+        batch_size = bids.shape[0]
+        bids_matrix = bids.view(-1, self.n_agents, self.n_items)
+        padded = torch.nn.functional.pad(
+            bids_matrix,
+            [0, 1, 0, 1],
+            mode='constant',
+            value=0
+        )  # pads column on right and row on bottom of zeros
+        agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
+        item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
+
+        plan = sinkhorn_plan(padded,
+                             agent_tiled_marginals,
+                             item_tiled_marginals,
+                             rounds=20, epsilon=2e-2)
+
+        # chop off dummy allocations
+        plan_without_dummies = plan[..., 0:-1, 0:-1]
+
+        return plan_without_dummies
 
     def forward(self, bids):
         """
@@ -42,7 +64,7 @@ class DoubleNet(nn.module):
         X = bids.view(-1, self.n_agents * self.n_items)
         augmented = self.neural_network_forward(X)
 
-        allocs = self.bipartite_matching(augmented)
+        allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
         payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
 
         return allocs, payments
@@ -129,3 +151,4 @@ def train_loop(
             # "regret_rho": rho,
             "payment_mult": payment_mult,
         }
+
