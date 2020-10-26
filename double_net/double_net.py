@@ -7,10 +7,11 @@ from double_net.sinkhorn import generate_marginals, sinkhorn_plan
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items):
+    def __init__(self, n_agents, n_items, clamp_op):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
+        self.clamp_op = clamp_op
 
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
@@ -67,7 +68,7 @@ class DoubleNet(nn.Module):
         allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
         payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
 
-        return allocs, payments
+        return allocs.view(-1, self.n_agents, self.n_items), payments
 
 
 def train_loop(
@@ -109,7 +110,6 @@ def train_loop(
                 # regret_loss = (regret_mults * (positive_regrets + positive_regrets.max(dim=0).values) / 2).mean()
                 # regret_quad = (rho / 2.0) * ((positive_regrets ** 2).mean() +
                 #                              (positive_regrets.max(dim=0).values ** 2).mean()) / 2
-
 
             # Add batch to epoch stats
             regrets_epoch = torch.cat((regrets_epoch, regrets), dim=0)

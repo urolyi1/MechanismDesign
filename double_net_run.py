@@ -42,7 +42,7 @@ item_ranges = ds.preset_valuation_range(args.n_agents, args.n_items, dataset_nam
 clamp_op = ds.get_clamp_op(item_ranges)
 
 model = DoubleNet(
-    args.n_agents, args.n_items
+    args.n_agents, args.n_items, clamp_op
 )
 
 train_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.num_examples, item_ranges)
