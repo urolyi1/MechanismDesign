@@ -17,6 +17,10 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
         )
+        self.payment_net = nn.Sequential(
+            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, 1), nn.Sigmoid()
+        )
         self.agents_marginal, self.items_marginal = generate_marginals(self.n_agents, self.n_items)
 
     def neural_network_forward(self, bids):
@@ -66,7 +70,8 @@ class DoubleNet(nn.Module):
         augmented = self.neural_network_forward(X)
 
         allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
-        payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
+        # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
+        payments = self.payment_net(X)*((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
 
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
