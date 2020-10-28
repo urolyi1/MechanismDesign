@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
+import numpy as np
 from argparse import ArgumentParser
 from double_net.double_net import DoubleNet, train_loop
 from double_net import datasets as ds
@@ -20,7 +21,7 @@ parser.add_argument('--num-epochs', type=int, default=200)
 parser.add_argument('--batch-size', type=int, default=512)
 parser.add_argument('--test-batch-size', type=int, default=512)
 parser.add_argument('--model-lr', type=float, default=1e-3)
-parser.add_argument('--misreport-lr', type=float, default=1e-1)
+parser.add_argument('--misreport-lr', type=float, default=1e-2)
 parser.add_argument('--misreport-iter', type=int, default=25)
 parser.add_argument('--test-misreport-iter', type=int, default=1000)
 parser.add_argument('--rho', type=float, default=0.5)
@@ -41,6 +42,9 @@ parser.add_argument('--name', default='testing_name')
 
 dataset_name = "double_net/1x2-pv.csv"
 args = parser.parse_args()
+
+torch.manual_seed(args.random_seed)
+np.random.seed(args.random_seed)
 
 item_ranges = ds.preset_valuation_range(args.n_agents, args.n_items, dataset_name)
 clamp_op = ds.get_clamp_op(item_ranges)

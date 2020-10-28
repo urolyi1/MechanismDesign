@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 import torch.nn.functional as F
+import numpy as np
 from argparse import ArgumentParser
 from double_net.regret_net import RegretNetUnitDemand, train_loop
 from double_net import datasets as ds
@@ -37,6 +38,9 @@ parser.add_argument('--name', default='testing_name')
 
 dataset_name = "double_net/1x2-pv.csv"
 args = parser.parse_args()
+
+torch.manual_seed(args.random_seed)
+np.random.seed(args.random_seed)
 
 item_ranges = ds.preset_valuation_range(args.n_agents, args.n_items, dataset_name)
 clamp_op = ds.get_clamp_op(item_ranges)
