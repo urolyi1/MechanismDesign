@@ -4,6 +4,10 @@ import torch.nn.functional as F
 from argparse import ArgumentParser
 from double_net.double_net import DoubleNet, train_loop
 from double_net import datasets as ds
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
 parser = ArgumentParser()
 parser.add_argument('--random-seed', type=int, default=0)
@@ -19,7 +23,7 @@ parser.add_argument('--model-lr', type=float, default=1e-3)
 parser.add_argument('--misreport-lr', type=float, default=1e-1)
 parser.add_argument('--misreport-iter', type=int, default=25)
 parser.add_argument('--test-misreport-iter', type=int, default=1000)
-parser.add_argument('--rho', type=float, default=1.0)
+parser.add_argument('--rho', type=float, default=0.5)
 parser.add_argument('--rho-incr-iter', type=int, default=5)
 parser.add_argument('--rho-incr-amount', type=float, default=1)
 parser.add_argument('--lagr-update-iter', type=int, default=6)
@@ -43,9 +47,9 @@ clamp_op = ds.get_clamp_op(item_ranges)
 
 model = DoubleNet(
     args.n_agents, args.n_items, clamp_op
-)
+).to(device)
 
 train_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.num_examples, item_ranges)
-train_loader = ds.Dataloader(train_data, batch_size=32, shuffle=True)
+train_loader = ds.Dataloader(train_data, batch_size=512, shuffle=True)
 
-train_loop(model, train_loader, args)
+train_loop(model, train_loader, args, device=device)

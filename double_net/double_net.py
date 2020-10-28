@@ -21,7 +21,9 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
-        self.agents_marginal, self.items_marginal = generate_marginals(self.n_agents, self.n_items)
+        agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
+        self.register_buffer('agents_marginal', agents_marginal)
+        self.register_buffer('items_marginal', items_marginal)
 
     def neural_network_forward(self, bids):
         """Augments bids in neural network
