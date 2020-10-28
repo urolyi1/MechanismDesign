@@ -19,7 +19,7 @@ class DoubleNet(nn.Module):
         )
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, 1), nn.Sigmoid()
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
         self.agents_marginal, self.items_marginal = generate_marginals(self.n_agents, self.n_items)
 
@@ -71,7 +71,7 @@ class DoubleNet(nn.Module):
 
         allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
-        payments = self.payment_net(X)*((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
+        payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
 
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
@@ -156,4 +156,66 @@ def train_loop(
             # "regret_rho": rho,
             "payment_mult": payment_mult,
         }
+
+
+def train_loop_no_lagrange(
+    model, train_loader, args, device='cpu'
+):
+    payment_mult = 1
+    optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
+
+    iter = 0
+
+    for epoch in tqdm(range(args.num_epochs)):
+        regrets_epoch = torch.Tensor().to(device)
+        payments_epoch = torch.Tensor().to(device)
+
+        for i, batch in enumerate(train_loader):
+            iter += 1
+            batch = batch.to(device)
+            misreport_batch = batch.clone().detach().to(device)
+            utils.optimize_misreports(
+                model, batch, misreport_batch, misreport_iter=args.misreport_iter, lr=args.misreport_lr
+            )
+
+            allocs, payments = model(batch)
+            truthful_util = utils.calc_agent_util(batch, allocs, payments)
+            misreport_util = utils.tiled_misreport_util(misreport_batch, batch, model)
+            regrets = misreport_util - truthful_util
+            positive_regrets = torch.clamp_min(regrets, 0)
+
+            payment_loss = payments.sum(dim=1).mean() * payment_mult
+
+            if epoch < args.rgt_start:
+                regret_loss = 0
+            else:
+                regret_loss = torch.sqrt(positive_regrets.mean()) + positive_regrets.mean()
+                # regret_loss = (regret_mults * (positive_regrets + positive_regrets.max(dim=0).values) / 2).mean()
+                # regret_quad = (rho / 2.0) * ((positive_regrets ** 2).mean() +
+                #                              (positive_regrets.max(dim=0).values ** 2).mean()) / 2
+
+            # Add batch to epoch stats
+            regrets_epoch = torch.cat((regrets_epoch, regrets), dim=0)
+            payments_epoch = torch.cat((payments_epoch, payments), dim=0)
+            # price_of_fair_epoch = torch.cat((price_of_fair_epoch, price_of_fair), dim=0)
+
+            # Calculate loss
+            loss_func = regret_loss - payment_loss
+
+            # update model
+            optimizer.zero_grad()
+            loss_func.backward()
+            optimizer.step()
+
+        # Log training stats
+        train_stats = {
+            "regret_max": regrets_epoch.max().item(),
+            # "regret_min": regrets_epoch.min().item(),
+            "regret_mean": regrets_epoch.mean().item(),
+
+            # "payment_max": payments_epoch.sum(dim=1).max().item(),
+            # "payment_min": payments_epoch.sum(dim=1).min().item(),
+            "payment": payments_epoch.sum(dim=1).mean().item(),
+        }
+        print(train_stats)
 
