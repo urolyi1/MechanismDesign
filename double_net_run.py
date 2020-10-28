@@ -5,6 +5,9 @@ import numpy as np
 from argparse import ArgumentParser
 from double_net.double_net import DoubleNet, train_loop
 from double_net import datasets as ds
+import time
+
+
 if torch.cuda.is_available():
     device = 'cuda'
 else:
@@ -56,4 +59,11 @@ model = DoubleNet(
 train_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.num_examples, item_ranges)
 train_loader = ds.Dataloader(train_data, batch_size=512, shuffle=True)
 
+start_time = time.time()
 train_loop(model, train_loader, args, device=device)
+
+end_time = time.time()
+hours = (end_time - start_time) // 3600
+mins =  ((end_time - start_time) % 3600) // 60
+secs = ((end_time - start_time) % 60)
+print(f'Hours: {hours}, Minutes: {mins}, Seconds: {secs}')
