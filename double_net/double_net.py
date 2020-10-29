@@ -221,3 +221,40 @@ def train_loop_no_lagrange(
         }
         print(train_stats)
 
+
+def test_loop(model, loader, args, device='cpu'):
+    # regrets and payments are 2d: n_samples x n_agents; unfairs is 1d: n_samples.
+    test_regrets = torch.Tensor().to(device)
+    test_payments = torch.Tensor().to(device)
+
+    for i, batch in enumerate(loader):
+        batch = batch.to(device)
+        misreport_batch = batch.clone().detach()
+        utils.optimize_misreports(model, batch, misreport_batch,
+                                   misreport_iter=args.test_misreport_iter, lr=args.misreport_lr)
+
+        allocs, payments = model(batch)
+        truthful_util = utils.calc_agent_util(batch, allocs, payments)
+        misreport_util = utils.tiled_misreport_util(misreport_batch, batch, model)
+
+        regrets = misreport_util - truthful_util
+        positive_regrets = torch.clamp_min(regrets, 0)
+
+        # Record entire test data
+        test_regrets = torch.cat((test_regrets, positive_regrets), dim=0)
+        test_payments = torch.cat((test_payments, payments), dim=0)
+
+    mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
+    # mean_sq_regret = (test_regrets ** 2).sum(dim=1).mean(dim=0).item()
+    # regret_var = max(mean_sq_regret - mean_regret ** 2, 0)
+    result = {
+        "payment_mean": test_payments.sum(dim=1).mean(dim=0).item(),
+        # "regret_std": regret_var ** .5,
+        "regret_mean": mean_regret,
+        "regret_max": test_regrets.sum(dim=1).max().item(),
+    }
+    # for i in range(model.n_agents):
+    #     agent_regrets = test_regrets[:, i]
+    #     result[f"regret_agt{i}_std"] = (((agent_regrets ** 2).mean() - agent_regrets.mean() ** 2) ** .5).item()
+    #     result[f"regret_agt{i}_mean"] = agent_regrets.mean().item()
+    return result

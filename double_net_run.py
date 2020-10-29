@@ -3,7 +3,7 @@ from torch import nn, optim
 import torch.nn.functional as F
 import numpy as np
 from argparse import ArgumentParser
-from double_net.double_net import DoubleNet, train_loop
+from double_net.double_net import DoubleNet, train_loop, test_loop
 from double_net import datasets as ds
 import time
 
@@ -16,7 +16,7 @@ else:
 parser = ArgumentParser()
 parser.add_argument('--random-seed', type=int, default=0)
 parser.add_argument('--num-examples', type=int, default=2048)
-parser.add_argument('--test-num-examples', type=int, default=3000)
+parser.add_argument('--test-num-examples', type=int, default=2048)
 parser.add_argument('--test-iter', type=int, default=5)
 parser.add_argument('--n-agents', type=int, default=1)
 parser.add_argument('--n-items', type=int, default=2)
@@ -56,11 +56,17 @@ model = DoubleNet(
     args.n_agents, args.n_items, clamp_op
 ).to(device)
 
-train_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.num_examples, item_ranges)
+train_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.num_examples, item_ranges).to(device)
 train_loader = ds.Dataloader(train_data, batch_size=512, shuffle=True)
 
 start_time = time.time()
 train_loop(model, train_loader, args, device=device)
+
+test_data = ds.generate_dataset_nxk(args.n_agents, args.n_items, args.test_num_examples, item_ranges).to(device)
+test_loader = ds.Dataloader(test_data, batch_size=args.test_batch_size, shuffle=True)
+
+result = test_loop(model, test_loader, args, device=device)
+print(result)
 
 end_time = time.time()
 hours = (end_time - start_time) // 3600
