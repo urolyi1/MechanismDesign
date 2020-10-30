@@ -7,11 +7,12 @@ from double_net.sinkhorn import generate_marginals, sinkhorn_plan
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items, clamp_op):
+    def __init__(self, n_agents, n_items, clamp_op, max_value=1.0):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
         self.clamp_op = clamp_op
+        self.max_value = max_value
 
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
@@ -44,7 +45,7 @@ class DoubleNet(nn.Module):
         """
         batch_size = bids.shape[0]
         bids_matrix = bids.view(-1, self.n_agents, self.n_items)
-        padded = torch.nn.functional.pad(
+        padded = -torch.nn.functional.pad(
             bids_matrix,
             [0, 1, 0, 1],
             mode='constant',
