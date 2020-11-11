@@ -7,12 +7,14 @@ from double_net.sinkhorn import generate_marginals, sinkhorn_plan
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items, clamp_op, max_value=1.0):
+    def __init__(self, n_agents, n_items, clamp_op, sinkhorn_epsilon, sinkhorn_rounds):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
         self.clamp_op = clamp_op
-        self.max_value = max_value
+
+        self.sinkhorn_epsilon = sinkhorn_epsilon
+        self.sinkhorn_rounds = sinkhorn_rounds
 
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
@@ -57,7 +59,7 @@ class DoubleNet(nn.Module):
         plan = sinkhorn_plan(padded,
                              agent_tiled_marginals,
                              item_tiled_marginals,
-                             rounds=20, epsilon=2e-2)
+                             rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
 
         # chop off dummy allocations
         plan_without_dummies = plan[..., 0:-1, 0:-1]
