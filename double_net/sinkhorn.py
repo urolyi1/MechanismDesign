@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 
-def sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=2):
+def sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=2, debug=False):
     K = torch.exp(-dist_mat / epsilon)
     Kt = K.transpose(-1, -2)
     v = torch.ones_like(b)
@@ -10,11 +10,31 @@ def sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=2):
     u = a / torch.einsum('...ij,...j->...i', K, v)
     v = b / torch.einsum('...ij,...j->...i', Kt, u)
 
+    if debug:
+        u_diffs = []
+        v_diffs = []
+
     for i in range(rounds):
+        if debug:
+            old_us = u.clone()
+            old_vs = v.clone()
+
         u = a / torch.einsum('...ij,...j->...i', K, v)
         v = b / torch.einsum('...ij,...j->...i', Kt, u)
 
+        if debug:
+            u_diff = u - old_us
+            v_diff = v - old_vs
+            u_diffs.append( u_diff.flatten(start_dim=1).norm(dim=1).mean().item() )
+            v_diffs.append( v_diff.flatten(start_dim=1).norm(dim=1).mean().item() )
+
+
     # this einsum does batched torch.diag(u) @ K @ torch.diag(v)
+
+    if debug:
+        print("mean norm of differences in u at each iteration", u_diffs)
+        print("mean norm of differences in v at each iteration", v_diffs)
+
     return torch.einsum('...i,...ik,...k->...ik', u, K, v)
 
 def generate_marginals_demands(agent_demand_list, item_supply_list):
