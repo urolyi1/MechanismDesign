@@ -16,12 +16,13 @@ class DoubleNet(nn.Module):
 
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(),
         )
-        self.payment_net = nn.Sequential(
-            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
+        self.allocation_head = nn.Linear(128, self.n_agents * self.n_items)
+        self.payment_head = nn.Sequential(
+            nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
+
         agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         self.register_buffer('agents_marginal', agents_marginal)
         self.register_buffer('items_marginal', items_marginal)
@@ -33,9 +34,8 @@ class DoubleNet(nn.Module):
         :return: augmented bids [batch_size, n_agents * n_items]
         """
         augmented = self.neural_net(bids)
-        clamped_bids = torch.min(bids, augmented)  # Making sure neural network does not increase bid of bidders
 
-        return clamped_bids
+        return augmented
 
     def bipartite_matching(self, bids):
         """Given bids finds max-weight bipartite matching
@@ -72,9 +72,12 @@ class DoubleNet(nn.Module):
         X = bids.view(-1, self.n_agents * self.n_items)
         augmented = self.neural_network_forward(X)
 
-        allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
-        # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
-        payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
+        nn_allocs = self.allocation_head(augmented)
+        clamped_bids = torch.clamp(torch.min(X, nn_allocs), min=0)  # Making sure neural network does not increase bid of bidders
+
+        allocs = self.bipartite_matching(clamped_bids).view(-1, self.n_agents * self.n_items)
+
+        payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
 
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
