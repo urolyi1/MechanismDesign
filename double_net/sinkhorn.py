@@ -58,13 +58,16 @@ def generate_marginals_demands(agent_demand_list, item_supply_list):
 
 
 
-def log_sinkhorn_plan(dist_mat, a, b, epsilon, rounds):
+def log_sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=3):
+    batch_size = dist_mat.shape[0]
     v = torch.ones_like(b)
     g = epsilon * torch.log(v)
     for i in range(rounds):
-        f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None]) / epsilon, dim=-1) + \
+        # f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None]) / epsilon, dim=-1) + \
+        f = -epsilon * torch.logsumexp(-(dist_mat - g.view(batch_size, 1, -1)) / epsilon, dim=-1) + \
             epsilon * torch.log(a)
-        g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None, :]) / epsilon, dim=1) + \
+        # g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None, :]) / epsilon, dim=1) + \
+        g = -epsilon * torch.logsumexp(-(dist_mat - f.view(batch_size, -1, 1)) / epsilon, dim=1) + \
             epsilon * torch.log(b)
 
     return torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon)
