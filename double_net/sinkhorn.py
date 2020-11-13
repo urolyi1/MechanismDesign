@@ -64,7 +64,7 @@ def log_sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=3):
     for i in range(rounds):
         f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None, :]) / epsilon, dim=-1) + \
             epsilon * torch.log(a)
-        g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None]) / epsilon, dim=1) + \
+        g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None]) / epsilon, dim=-2) + \
             epsilon * torch.log(b)
 
     return torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon)
