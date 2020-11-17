@@ -15,12 +15,12 @@ else:
 
 parser = ArgumentParser()
 parser.add_argument('--random-seed', type=int, default=0)
-parser.add_argument('--num-examples', type=int, default=4096 * 4)
+parser.add_argument('--num-examples', type=int, default=4096)
 parser.add_argument('--test-num-examples', type=int, default=2048)
 parser.add_argument('--test-iter', type=int, default=5)
 parser.add_argument('--n-agents', type=int, default=1)
 parser.add_argument('--n-items', type=int, default=2)
-parser.add_argument('--num-epochs', type=int, default=10)
+parser.add_argument('--num-epochs', type=int, default=5)
 parser.add_argument('--batch-size', type=int, default=128)
 parser.add_argument('--test-batch-size', type=int, default=512)
 parser.add_argument('--model-lr', type=float, default=1e-2)
@@ -32,7 +32,7 @@ parser.add_argument('--rho-incr-iter', type=int, default=5)
 parser.add_argument('--rho-incr-amount', type=float, default=1)
 parser.add_argument('--lagr-update-iter', type=int, default=6)
 parser.add_argument('--rgt-start', type=int, default=0)
-parser.add_argument('--sinkhorn-epsilon', type=float, default=1e-2)
+parser.add_argument('--sinkhorn-epsilon', type=float, default=1e-5)
 parser.add_argument('--sinkhorn-rounds', type=int, default=20)
 
 # dataset selection: specifies a configuration of agent/item/valuation

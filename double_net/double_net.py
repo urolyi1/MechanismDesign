@@ -3,7 +3,7 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
-from double_net.sinkhorn import generate_marginals, sinkhorn_plan
+from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan
 
 
 class DoubleNet(nn.Module):
