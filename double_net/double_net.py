@@ -56,7 +56,7 @@ class DoubleNet(nn.Module):
         agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
         item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
 
-        plan = sinkhorn_plan(padded,
+        plan = log_sinkhorn_plan(padded,
                              agent_tiled_marginals,
                              item_tiled_marginals,
                              rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)

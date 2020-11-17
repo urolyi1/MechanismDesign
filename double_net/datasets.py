@@ -72,6 +72,7 @@ def preset_valuation_range(n_agents, n_items, dataset=None):
             else:
                 item_ranges[:, :, 1] = item_ranges[:, :, 1]*multiplier
         elif 'pavlov' in dataset[0] or 'pv' in dataset[0]:
+            print("pavlov U[2,3] Auction")
             item_ranges = item_ranges + 2
         else:
             print(dataset[0], 'is not a valid dataset name. Defaulting to Manelli-Vincent auction.')
