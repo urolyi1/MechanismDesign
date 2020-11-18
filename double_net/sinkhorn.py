@@ -37,23 +37,19 @@ def sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=2, debug=False):
 
     return torch.einsum('...i,...ik,...k->...ik', u, K, v)
 
-def generate_marginals_demands(agent_demand_list, item_supply_list):
+def generate_additive_marginals(agent_demand_list, item_supply_list):
     agent_demand_list = np.array([float(x) for x in agent_demand_list])
     item_supply_list = np.array([float(x) for x in item_supply_list])
 
     total_agent_demand = agent_demand_list.sum()
     total_item_supply = item_supply_list.sum()
 
-    if total_agent_demand > total_item_supply:
-        item_supply_list = np.append(item_supply_list, [ (total_agent_demand - total_item_supply) + 1.0])
-        agent_demand_list = np.append(agent_demand_list, [1.0])
-    else:
-        agent_demand_list = np.append(agent_demand_list, [ (total_item_supply - total_agent_demand) + 1.0])
-        item_supply_list = np.append(item_supply_list, [1.0])
+    agent_demand_list = np.append(agent_demand_list, [total_item_supply])
+    item_supply_list = np.append(item_supply_list, [total_agent_demand])
 
-    # assert agent_demand_list.sum() == item_supply_list.sum()
+    assert agent_demand_list.sum() == item_supply_list.sum()
 
-    return torch.tensor(agent_demand_list), torch.tensor(item_supply_list)
+    return torch.tensor(agent_demand_list).float(), torch.tensor(item_supply_list).float()
 
 
 
