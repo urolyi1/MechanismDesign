@@ -3,11 +3,11 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
-from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, sinkhorn_plan
+from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items, clamp_op, sinkhorn_epsilon, sinkhorn_rounds):
+    def __init__(self, n_agents, n_items, clamp_op, sinkhorn_epsilon, sinkhorn_rounds, marginal_choice='unit'):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
@@ -24,7 +24,13 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
-        agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
+        if marginal_choice == 'unit':
+            agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
+        elif marginal_choice == 'additive':
+            agents_marginal, items_marginal = generate_additive_marginals([self.n_items], [1] * self.n_items)
+        else:
+            raise NotImplementedError(f"{marginal_choice} demand structure not implemented")
+
         self.register_buffer('agents_marginal', agents_marginal)
         self.register_buffer('items_marginal', items_marginal)
 

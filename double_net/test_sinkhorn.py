@@ -1,4 +1,4 @@
-from double_net.sinkhorn import generate_marginals_demands, generate_marginals, sinkhorn_plan, log_sinkhorn_plan
+from double_net.sinkhorn import generate_marginals, sinkhorn_plan, log_sinkhorn_plan
 import torch
 
 def test_log_sinkhorn():
@@ -19,22 +19,3 @@ def test_log_sinkhorn():
 
     assert torch.isclose(plan, log_plan, atol=1e-4).all()
 
-
-
-def test_demand_list():
-    a, b = generate_marginals_demands([1],[1,1])
-    assert list(a) == [1.0,2.0]
-    assert list(b) == [1.0,1.0,1.0]
-
-    a, b = generate_marginals_demands([2],[1,1])
-    assert list(a) == [2.0,1.0]
-    assert list(b) == [1.0,1.0,1.0]
-
-
-    a, b = generate_marginals_demands([3],[1,1])
-    assert list(a) == [3.0,1.0]
-    assert list(b) == [1.0,1.0,2.0]
-
-    a, b = generate_marginals_demands([1],[3,3])
-    assert list(a) == [1.0,6.0]
-    assert list(b) == [3.0,3.0,1.0]
