@@ -3,6 +3,25 @@ from tqdm import tqdm
 from torch import nn, optim
 import torch.nn.functional as F
 from double_net import utils_misreport as utils
+from double_net.utils_misreport import optimize_misreports, tiled_misreport_util, calc_agent_util
+
+
+class View(nn.Module):
+    def __init__(self, shape):
+        super(View, self).__init__()
+        self.shape = shape
+
+    def forward(self, x):
+        return x.view(*self.shape)
+
+
+class View_Cut(nn.Module):
+    def __init__(self):
+        super(View_Cut, self).__init__()
+
+    def forward(self, x):
+        return x[:, :-1, :]
+
 
 class RegretNetUnitDemand(nn.Module):
     def __init__(
@@ -71,8 +90,130 @@ class RegretNetUnitDemand(nn.Module):
         return allocs[:, :-1, :-1], payments
 
 
-def train_loop(model, train_loader, args, device="cpu"):
+class RegretNet(nn.Module):
+    def __init__(self, n_agents, n_items, hidden_layer_size=128, clamp_op=None, n_hidden_layers=2,
+                 activation='tanh', separate=False):
+        super(RegretNet, self).__init__()
 
+        # this is for additive valuations only
+        self.activation = activation
+        if activation == 'tanh':
+            self.act = nn.Tanh
+        else:
+            self.act = nn.ReLU
+
+        self.clamp_op = clamp_op
+
+        self.n_agents = n_agents
+        self.n_items = n_items
+
+        self.input_size = self.n_agents * self.n_items
+        self.hidden_layer_size = hidden_layer_size
+        self.n_hidden_layers = n_hidden_layers
+        self.separate = separate
+
+        # outputs are agents (+dummy agent) per item, plus payments per agent
+        self.allocations_size = (self.n_agents + 1) * self.n_items
+        self.payments_size = self.n_agents
+
+        # Set a_activation to softmax
+        self.allocation_head = [nn.Linear(self.hidden_layer_size, self.allocations_size),
+                                View((-1, self.n_agents + 1, self.n_items)),
+                                nn.Softmax(dim=1),
+                                View_Cut()]
+
+        # Set p_activation to frac_sigmoid
+        self.payment_head = [
+            nn.Linear(self.hidden_layer_size, self.payments_size), nn.Sigmoid()
+        ]
+
+        if separate:
+            self.nn_model = nn.Sequential()
+            self.payment_head = [nn.Linear(self.input_size, self.hidden_layer_size), self.act()] + \
+                                [l for i in range(n_hidden_layers)
+                                 for l in (nn.Linear(self.hidden_layer_size, self.hidden_layer_size), self.act())] + \
+                                self.payment_head
+
+            self.payment_head = nn.Sequential(*self.payment_head)
+            self.allocation_head = [nn.Linear(self.input_size, self.hidden_layer_size), self.act()] + \
+                                   [l for i in range(n_hidden_layers)
+                                    for l in (nn.Linear(self.hidden_layer_size, self.hidden_layer_size), self.act())] + \
+                                   self.allocation_head
+            self.allocation_head = nn.Sequential(*self.allocation_head)
+        else:
+            self.nn_model = nn.Sequential(
+                *([nn.Linear(self.input_size, self.hidden_layer_size), self.act()] +
+                  [l for i in range(self.n_hidden_layers)
+                   for l in (nn.Linear(self.hidden_layer_size, self.hidden_layer_size), self.act())])
+            )
+            self.allocation_head = nn.Sequential(*self.allocation_head)
+            self.payment_head = nn.Sequential(*self.payment_head)
+
+    def glorot_init(self):
+        """
+        reinitializes with glorot (aka xavier) uniform initialization
+        """
+
+        def initialize_fn(layer):
+            if type(layer) == nn.Linear:
+                torch.nn.init.xavier_uniform_(layer.weight)
+
+        self.apply(initialize_fn)
+
+    def forward(self, reports):
+        # x should be of size [batch_size, n_agents, n_items
+        # should be reshaped to [batch_size, n_agents * n_items]
+        # output should be of size [batch_size, n_agents, n_items],
+        # either softmaxed per item, or else doubly stochastic
+        x = reports.view(-1, self.n_agents * self.n_items)
+        x = self.nn_model(x)
+        allocs = self.allocation_head(x)
+
+        # frac_sigmoid payment: multiply p = p_tilde * sum(alloc*bid)
+        payments = self.payment_head(x) * torch.sum(
+            allocs * reports, dim=2
+        )
+
+        return allocs, payments
+
+
+def test_loop(model, loader, args, device='cpu'):
+    # regrets and payments are 2d: n_samples x n_agents; unfairs is 1d: n_samples.
+    test_regrets = torch.Tensor().to(device)
+    test_payments = torch.Tensor().to(device)
+
+    for i, batch in enumerate(loader):
+        batch = batch.to(device)
+        misreport_batch = batch.clone().detach()
+        optimize_misreports(model, batch, misreport_batch,
+                            misreport_iter=args.test_misreport_iter, lr=args.misreport_lr)
+
+        allocs, payments = model(batch)
+        truthful_util = calc_agent_util(batch, allocs, payments)
+        misreport_util = tiled_misreport_util(misreport_batch, batch, model)
+
+        regrets = misreport_util - truthful_util
+        positive_regrets = torch.clamp_min(regrets, 0)
+
+        # Record entire test data
+        test_regrets = torch.cat((test_regrets, positive_regrets), dim=0)
+        test_payments = torch.cat((test_payments, payments), dim=0)
+
+    mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
+    result = {
+        "payment_mean": test_payments.sum(dim=1).mean(dim=0).item(),
+        # "regret_std": regret_var ** .5,
+        "regret_mean": mean_regret,
+        "regret_max": test_regrets.sum(dim=1).max().item(),
+    }
+    # for i in range(model.n_agents):
+    #     agent_regrets = test_regrets[:, i]
+    #     result[f"regret_agt{i}_std"] = (((agent_regrets ** 2).mean() - agent_regrets.mean() ** 2) ** .5).item()
+    #     result[f"regret_agt{i}_mean"] = agent_regrets.mean().item()
+    return result
+
+
+def train_loop(model, train_loader, args, device="cpu"):
     regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
     payment_mult = 1
 

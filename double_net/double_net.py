@@ -3,7 +3,7 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
-from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals
+from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals
 
 
 class DoubleNet(nn.Module):
@@ -18,16 +18,22 @@ class DoubleNet(nn.Module):
 
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh()
         )
+        self.alloc_head = nn.Linear(128, self.n_agents * self.n_items)
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
+#         self.payment_head = nn.Sequential(
+#             nn.Linear(128, self.n_agents), nn.Sigmoid() 
+#         )
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
             agents_marginal, items_marginal = generate_additive_marginals([self.n_items], [1] * self.n_items)
+        elif marginal_choice == 'exact_one':
+            agents_marginal, items_marginal = generate_exact_one_marginals(self.n_agents, self.n_items)
         else:
             raise NotImplementedError(f"{marginal_choice} demand structure not implemented")
 
@@ -41,9 +47,8 @@ class DoubleNet(nn.Module):
         :return: augmented bids [batch_size, n_agents * n_items]
         """
         augmented = self.neural_net(bids)
-        clamped_bids = torch.min(bids, augmented)  # Making sure neural network does not increase bid of bidders
-
-        return clamped_bids
+        
+        return augmented
 
     def bipartite_matching(self, bids):
         """Given bids finds max-weight bipartite matching
@@ -78,12 +83,12 @@ class DoubleNet(nn.Module):
         :return: allocations tensor [batch_size, n_agents, n_items], payments tensor [batch_size, n_agents]
         """
         X = bids.view(-1, self.n_agents * self.n_items)
-        augmented = self.neural_network_forward(X)
+        augmented = self.alloc_head(self.neural_network_forward(X))
 
         allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
         payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
-
+        # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
 
@@ -112,7 +117,7 @@ def train_loop(
             allocs, payments = model(batch)
             truthful_util = utils.calc_agent_util(batch, allocs, payments)
             misreport_util = utils.tiled_misreport_util(misreport_batch, batch, model)
-            regrets = misreport_util - truthful_util
+            regrets = torch.clamp(misreport_util - truthful_util, min=0)
             positive_regrets = torch.clamp_min(regrets, 0)
 
             payment_loss = payments.sum(dim=1).mean() * payment_mult
@@ -147,6 +152,7 @@ def train_loop(
             if iter % args.lagr_update_iter == 0:
                 with torch.no_grad():
                     regret_mults += rho * positive_regrets.mean(dim=0)
+                    print(regret_mults)
             if iter % args.rho_incr_iter == 0:
                 rho += args.rho_incr_amount
 
