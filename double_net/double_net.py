@@ -28,10 +28,6 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
-#         self.payment_head = nn.Sequential(
-#             nn.Linear(128, self.n_agents), nn.Sigmoid() 
-#         )
-        
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
@@ -51,7 +47,6 @@ class DoubleNet(nn.Module):
         :return: augmented bids [batch_size, n_agents * n_items]
         """
         augmented = self.neural_net(bids)
-        
         return augmented
 
     def bipartite_matching(self, bids):
@@ -72,9 +67,9 @@ class DoubleNet(nn.Module):
         item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
 
         plan = log_sinkhorn_plan(padded,
-                             agent_tiled_marginals,
-                             item_tiled_marginals,
-                             rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
+                                 agent_tiled_marginals,
+                                 item_tiled_marginals,
+                                 rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
 
         # chop off dummy allocations
         plan_without_dummies = plan[..., 0:-1, 0:-1]
@@ -96,9 +91,8 @@ class DoubleNet(nn.Module):
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
     def save(self, filename_prefix='./'):
-        
-        torch.save(self.neural_net.state_dict(), filename_prefix+'doublenet.pytorch')
-        params_dict = {
+        torch.save(self.neural_net.state_dict(), filename_prefix + 'doublenet.pytorch')
+	params_dict = {
             'n_agents': self.n_agents,
             'n_items': self.n_items,
             'item_ranges': self.item_ranges,
@@ -106,8 +100,8 @@ class DoubleNet(nn.Module):
             'sinkhorn_rounds': self.sinkhorn_rounds,
             'marginal_choice': self.marginal_choice,
         }
-        with open(filename_prefix+'doublenet_classvariables.pickle', 'wb') as f:
-            pickle.dump(params_dict, f)
+        with open(filename_prefix + 'doublenet_classvariables.pickle', 'wb') as f:
+	    pickle.dump(params_dict, f)
 
     @staticmethod
     def load(filename_prefix):
@@ -122,14 +116,13 @@ class DoubleNet(nn.Module):
             params_dict['sinkhorn_rounds'],
             params_dict['marginal_choice'],
         )
-
-        result.neural_net.load_state_dict(torch.load(filename_prefix+'doublenet.pytorch'))
+        result.neural_net.load_state_dict(torch.load(filename_prefix + 'doublenet.pytorch'))
 
         return result
     
     
 def train_loop(
-    model, train_loader, args, device='cpu'
+        model, train_loader, args, device='cpu'
 ):
     regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
     payment_mult = 1
@@ -177,8 +170,8 @@ def train_loop(
             loss_func = regret_loss \
                         + regret_quad \
                         - payment_loss \
-
-            # update model
+ \
+                # update model
             optimizer.zero_grad()
             loss_func.backward()
             optimizer.step()
@@ -212,7 +205,7 @@ def train_loop(
 
 
 def train_loop_no_lagrange(
-    model, train_loader, args, device='cpu'
+        model, train_loader, args, device='cpu'
 ):
     payment_mult = 1
     optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
@@ -282,7 +275,7 @@ def test_loop(model, loader, args, device='cpu'):
         batch = batch.to(device)
         misreport_batch = batch.clone().detach()
         utils.optimize_misreports(model, batch, misreport_batch,
-                                   misreport_iter=args.test_misreport_iter, lr=args.misreport_lr)
+                                  misreport_iter=args.test_misreport_iter, lr=args.misreport_lr)
 
         allocs, payments = model(batch)
         truthful_util = utils.calc_agent_util(batch, allocs, payments)
