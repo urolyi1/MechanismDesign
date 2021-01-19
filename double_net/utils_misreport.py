@@ -1,4 +1,5 @@
 import torch
+from torch import optim
 
 """ RegretNet utility operations """
 
@@ -33,15 +34,13 @@ def optimize_misreports(model, current_valuations, current_misreports, misreport
     # misreports are same size as valuations and start at same place
 
     current_misreports.requires_grad_(True)
-
+    optimizer = optim.Adam([current_misreports], lr=lr)
     for i in range(misreport_iter):
-        model.zero_grad()  # TODO move this where it ought to be
-        agent_utils = tiled_misreport_util(current_misreports, current_valuations, model)
-
-        (misreports_grad,) = torch.autograd.grad(agent_utils.sum(), current_misreports)
-
+        agent_utils = -tiled_misreport_util(current_misreports, current_valuations, model).sum()
+        optimizer.zero_grad()  # TODO move this where it ought to be
+        agent_utils.backward()
+        optimizer.step()
         with torch.no_grad():
-            current_misreports += lr * misreports_grad
             model.clamp_op(current_misreports)
 
     return current_misreports

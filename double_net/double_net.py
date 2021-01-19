@@ -9,6 +9,7 @@ from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_
 from double_net import datasets as ds
 
 
+
 class DoubleNet(nn.Module):
     def __init__(self, n_agents, n_items, item_ranges, sinkhorn_epsilon, sinkhorn_rounds, marginal_choice='unit'):
         super(DoubleNet, self).__init__()
@@ -29,10 +30,6 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
-        #         self.payment_head = nn.Sequential(
-        #             nn.Linear(128, self.n_agents), nn.Sigmoid()
-        #         )
-
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
@@ -52,7 +49,6 @@ class DoubleNet(nn.Module):
         :return: augmented bids [batch_size, n_agents * n_items]
         """
         augmented = self.neural_net(bids)
-
         return augmented
 
     def bipartite_matching(self, bids):

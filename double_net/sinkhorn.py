@@ -52,7 +52,18 @@ def generate_additive_marginals(agent_demand_list, item_supply_list):
     return torch.tensor(agent_demand_list).float(), torch.tensor(item_supply_list).float()
 
 
-
+def generate_exact_one_marginals(n_agents, n_items):
+    agent_demands = [1.0 for _ in range(n_agents)]
+    item_supplies = [1.0 for _ in range(n_items)]
+    if n_agents <= n_items:
+        agent_demands.append((n_items - n_agents))
+        item_supplies.append(0.0)
+    else:
+        raise ValueError("There must be least as many items as agents")
+    
+    assert sum(agent_demands) == sum(item_supplies)
+    
+    return torch.tensor(agent_demands).float(), torch.tensor(item_supplies).float()
 
 def log_sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=3):
     v = torch.ones_like(b)
