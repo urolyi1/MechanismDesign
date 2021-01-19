@@ -1,21 +1,24 @@
+import pickle
 import torch
 from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
 from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals
+from double_net import datasets as ds
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items, clamp_op, sinkhorn_epsilon, sinkhorn_rounds, marginal_choice='unit'):
+    def __init__(self, n_agents, n_items, item_ranges, sinkhorn_epsilon, sinkhorn_rounds, marginal_choice='unit'):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
-        self.clamp_op = clamp_op
-
+        self.item_ranges = item_ranges
+        self.clamp_op = ds.get_clamp_op(item_ranges)
+        self.marginal_choice = marginal_choice
         self.sinkhorn_epsilon = sinkhorn_epsilon
         self.sinkhorn_rounds = sinkhorn_rounds
-
+        
         self.neural_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh()
@@ -28,6 +31,7 @@ class DoubleNet(nn.Module):
 #         self.payment_head = nn.Sequential(
 #             nn.Linear(128, self.n_agents), nn.Sigmoid() 
 #         )
+        
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
@@ -91,7 +95,39 @@ class DoubleNet(nn.Module):
         # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
+    def save(self, filename_prefix='./'):
+        
+        torch.save(self.neural_net.state_dict(), filename_prefix+'doublenet.pytorch')
+        params_dict = {
+            'n_agents': self.n_agents,
+            'n_items': self.n_items,
+            'item_ranges': self.item_ranges,
+            'sinkhorn_epsilon': self.sinkhorn_epsilon,
+            'sinkhorn_rounds': self.sinkhorn_rounds,
+            'marginal_choice': self.marginal_choice,
+        }
+        with open(filename_prefix+'doublenet_classvariables.pickle', 'wb') as f:
+            pickle.dump(params_dict, f)
 
+    @staticmethod
+    def load(filename_prefix):
+        with open(filename_prefix + 'doublenet_classvariables.pickle', 'rb') as f:
+            params_dict = pickle.load(f)
+
+        result = DoubleNet(
+            params_dict['n_agents'],
+            params_dict['n_items'],
+            params_dict['item_ranges'],
+            params_dict['sinkhorn_epsilon'],
+            params_dict['sinkhorn_rounds'],
+            params_dict['marginal_choice'],
+        )
+
+        result.neural_net.load_state_dict(torch.load(filename_prefix+'doublenet.pytorch'))
+
+        return result
+    
+    
 def train_loop(
     model, train_loader, args, device='cpu'
 ):
