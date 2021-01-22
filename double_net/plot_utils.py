@@ -29,6 +29,8 @@ def plot_12_model(model, grid_width=0.1, item1_range=(0, 1), item2_range=(0, 1),
     ax2.set_title('prob of allocating item 2')
     ax2.set_xlabel('v1')
     ax2.set_ylabel('v2')
+    f.colorbar(im1, ax=ax1)
+    f.colorbar(im2, ax=ax2)
     f.tight_layout()
     f.show()
 

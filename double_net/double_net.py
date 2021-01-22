@@ -84,7 +84,7 @@ class DoubleNet(nn.Module):
         X = bids.view(-1, self.n_agents * self.n_items)
         augmented = self.alloc_head(self.neural_network_forward(X))
 
-        allocs = self.bipartite_matching(augmented).view(-1, self.n_agents * self.n_items)
+        allocs = self.bipartite_matching(augmented).reshape(-1, self.n_agents * self.n_items)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
         payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
         # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
@@ -92,7 +92,7 @@ class DoubleNet(nn.Module):
 
     def save(self, filename_prefix='./'):
         torch.save(self.neural_net.state_dict(), filename_prefix + 'doublenet.pytorch')
-	params_dict = {
+        params_dict = {
             'n_agents': self.n_agents,
             'n_items': self.n_items,
             'item_ranges': self.item_ranges,
@@ -101,7 +101,7 @@ class DoubleNet(nn.Module):
             'marginal_choice': self.marginal_choice,
         }
         with open(filename_prefix + 'doublenet_classvariables.pickle', 'wb') as f:
-	    pickle.dump(params_dict, f)
+            pickle.dump(params_dict, f)
 
     @staticmethod
     def load(filename_prefix):
