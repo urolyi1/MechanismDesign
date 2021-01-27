@@ -13,6 +13,8 @@ class DoubleNet(nn.Module):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
+        self.n_allocs = 2
+        self.alloc_weights = [0.5, 0.5]
         self.item_ranges = item_ranges
         self.clamp_op = ds.get_clamp_op(item_ranges)
         self.marginal_choice = marginal_choice
@@ -23,7 +25,7 @@ class DoubleNet(nn.Module):
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh()
         )
-        self.alloc_head = nn.Linear(128, self.n_agents * self.n_items)
+        self.alloc_head = nn.Linear(128, self.n_allocs * self.n_agents * self.n_items)
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
@@ -56,9 +58,9 @@ class DoubleNet(nn.Module):
         :return: allocations [batch_size, n_agents * n_items]
         """
         batch_size = bids.shape[0]
-        bids_matrix = bids.view(-1, self.n_agents, self.n_items)
+        # bids_matrix = bids.view(-1, self.n_agents, self.n_items)
         padded = -torch.nn.functional.pad(
-            bids_matrix,
+            bids,
             [0, 1, 0, 1],
             mode='constant',
             value=0
@@ -82,9 +84,13 @@ class DoubleNet(nn.Module):
         :return: allocations tensor [batch_size, n_agents, n_items], payments tensor [batch_size, n_agents]
         """
         X = bids.view(-1, self.n_agents * self.n_items)
-        augmented = self.alloc_head(self.neural_network_forward(X))
+        augmented = self.alloc_head(self.neural_network_forward(X)).view(-1, self.n_allocs, self.n_agents, self.n_items)
 
-        allocs = self.bipartite_matching(augmented).reshape(-1, self.n_agents * self.n_items)
+        allocs = 0.0
+        for i, weight in zip(range(self.n_allocs), self.alloc_weights):
+            curr_augmented = augmented[..., i, :, :]
+            allocs += weight * self.bipartite_matching(curr_augmented).reshape(-1, self.n_agents * self.n_items)
+        # allocs = self.bipartite_matching(augmented).reshape(-1, self.n_agents * self.n_items)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
         payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
         # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
