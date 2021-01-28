@@ -92,7 +92,7 @@ class DoubleNet(nn.Module):
     def save(self, filename_prefix='./'):
         torch.save(self.alloc_net.state_dict(), filename_prefix + 'alloc_net.pytorch')
         torch.save(self.payment_net.state_dict(), filename_prefix + 'payment_net.pytorch')
-        
+
         params_dict = {
             'n_agents': self.n_agents,
             'n_items': self.n_items,
@@ -272,6 +272,40 @@ def test_loop(model, loader, args, device='cpu'):
 
         # Record entire test data
         test_regrets = torch.cat((test_regrets, positive_regrets), dim=0)
+        test_payments = torch.cat((test_payments, payments), dim=0)
+
+    mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
+    result = {
+        "payment_mean": test_payments.sum(dim=1).mean(dim=0).item(),
+        "regret_mean": mean_regret,
+        "regret_max": test_regrets.sum(dim=1).max().item(),
+    }
+    return result
+
+
+def test_loop_random_start(model, loader, args, random_starts, device='cpu'):
+    # regrets and payments are 2d: n_samples x n_agents; unfairs is 1d: n_samples.
+    test_regrets = torch.Tensor().to(device)
+    test_payments = torch.Tensor().to(device)
+
+    for i, batch in tqdm(enumerate(loader)):
+        batch = batch.to(device)
+        allocs, payments = model(batch)
+        truthful_util = utils.calc_agent_util(batch, allocs, payments)
+
+        max_regrets = torch.zeros(truthful_util.shape).to(device=device)
+        for c in range(len(random_starts)):
+            misreport_batch = random_starts[c].clone().detach()
+            utils.optimize_misreports(model, batch, misreport_batch,
+                                      misreport_iter=args.test_misreport_iter, lr=args.misreport_lr)
+            misreport_util = utils.tiled_misreport_util(misreport_batch, batch, model)
+
+            regrets = misreport_util - truthful_util
+            positive_regrets = torch.clamp_min(regrets, 0)
+            max_regrets = torch.max(max_regrets, positive_regrets)
+
+        # Record entire test data
+        test_regrets = torch.cat((test_regrets, max_regrets), dim=0)
         test_payments = torch.cat((test_payments, payments), dim=0)
 
     mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
