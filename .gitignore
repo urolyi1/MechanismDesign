@@ -4,3 +4,6 @@
 .DS_Store?
 */__pycache__/*
 .idea/
+old_code/*
+misc/*
+type_matrix/*
