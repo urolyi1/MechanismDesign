@@ -31,7 +31,7 @@ class DoubleNet(nn.Module):
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
-            agents_marginal, items_marginal = generate_additive_marginals([self.n_items], [1] * self.n_items)
+            agents_marginal, items_marginal = generate_additive_marginals([self.n_items] * self.n_agents, [1] * self.n_items)
         elif marginal_choice == 'exact_one':
             agents_marginal, items_marginal = generate_exact_one_marginals(self.n_agents, self.n_items)
         else:
@@ -84,14 +84,16 @@ class DoubleNet(nn.Module):
         X = bids.view(-1, self.n_agents * self.n_items)
         augmented = self.alloc_head(self.neural_network_forward(X))
 
-        allocs = self.bipartite_matching(augmented).reshape(-1, self.n_agents * self.n_items)
+        allocs = self.bipartite_matching(augmented)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
-        payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
+        payments = self.payment_net(X) * ((allocs * X.view(-1, self.n_agents, self.n_items)).sum(dim=-1))
         # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
     def save(self, filename_prefix='./'):
         torch.save(self.neural_net.state_dict(), filename_prefix + 'doublenet.pytorch')
+        torch.save(self.payment_net, filename_prefix + 'pay_net.pytorch')
+        torch.save(self.alloc_head, filename_prefix + 'alloc_head.pytorch')
         params_dict = {
             'n_agents': self.n_agents,
             'n_items': self.n_items,
@@ -117,7 +119,8 @@ class DoubleNet(nn.Module):
             params_dict['marginal_choice'],
         )
         result.neural_net.load_state_dict(torch.load(filename_prefix + 'doublenet.pytorch'))
-
+        result.payment_net.load_state_dict(torch.load(filename_prefix + 'pay_net.pytorch'))
+        result.alloc_head.load_state_dict(torch.load(filename_prefix + 'alloc_head.pytorch'))
         return result
     
     
@@ -181,7 +184,6 @@ def train_loop(
             if iter % args.lagr_update_iter == 0:
                 with torch.no_grad():
                     regret_mults += rho * positive_regrets.mean(dim=0)
-                    print(regret_mults)
             if iter % args.rho_incr_iter == 0:
                 rho += args.rho_incr_amount
 
@@ -190,7 +192,7 @@ def train_loop(
             "regret_max": regrets_epoch.max().item(),
             # "regret_min": regrets_epoch.min().item(),
             "regret_mean": regrets_epoch.mean().item(),
-
+            "regret_mults": regret_mults,
             # "payment_max": payments_epoch.sum(dim=1).max().item(),
             # "payment_min": payments_epoch.sum(dim=1).min().item(),
             "payment": payments_epoch.sum(dim=1).mean().item(),
@@ -271,7 +273,7 @@ def test_loop(model, loader, args, device='cpu'):
     test_regrets = torch.Tensor().to(device)
     test_payments = torch.Tensor().to(device)
 
-    for i, batch in enumerate(loader):
+    for i, batch in tqdm(enumerate(loader)):
         batch = batch.to(device)
         misreport_batch = batch.clone().detach()
         utils.optimize_misreports(model, batch, misreport_batch,
