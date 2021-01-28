@@ -19,15 +19,15 @@ class DoubleNet(nn.Module):
         self.sinkhorn_epsilon = sinkhorn_epsilon
         self.sinkhorn_rounds = sinkhorn_rounds
         
-        self.neural_net = nn.Sequential(
+        self.alloc_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh()
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
         )
-        self.alloc_head = nn.Linear(128, self.n_agents * self.n_items)
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
+
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
         elif marginal_choice == 'additive':
@@ -46,7 +46,7 @@ class DoubleNet(nn.Module):
         :param bids: bids from bidders on items [batch_size, n_agents * n_items]
         :return: augmented bids [batch_size, n_agents * n_items]
         """
-        augmented = self.neural_net(bids)
+        augmented = self.alloc_net(bids)
         return augmented
 
     def bipartite_matching(self, bids):
@@ -82,12 +82,11 @@ class DoubleNet(nn.Module):
         :return: allocations tensor [batch_size, n_agents, n_items], payments tensor [batch_size, n_agents]
         """
         X = bids.view(-1, self.n_agents * self.n_items)
-        augmented = self.alloc_head(self.neural_network_forward(X))
+        augmented = self.neural_network_forward(X)
 
         allocs = self.bipartite_matching(augmented)
-        # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
         payments = self.payment_net(X) * ((allocs * X.view(-1, self.n_agents, self.n_items)).sum(dim=-1))
-        # payments = self.payment_head(augmented) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
+
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
     def save(self, filename_prefix='./'):
@@ -125,7 +124,7 @@ class DoubleNet(nn.Module):
     
     
 def train_loop(
-        model, train_loader, args, device='cpu'
+    model, train_loader, args, device='cpu'
 ):
     regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
     payment_mult = 1
@@ -134,6 +133,9 @@ def train_loop(
     iter = 0
     rho = args.rho
 
+    mean_regrets = []
+    mean_payments = []
+    lagrange_mults = []
     for epoch in tqdm(range(args.num_epochs)):
         regrets_epoch = torch.Tensor().to(device)
         payments_epoch = torch.Tensor().to(device)
@@ -160,21 +162,15 @@ def train_loop(
             else:
                 regret_loss = (regret_mults * positive_regrets).mean()
                 regret_quad = (rho / 2.0) * (positive_regrets ** 2).mean()
-                # regret_loss = (regret_mults * (positive_regrets + positive_regrets.max(dim=0).values) / 2).mean()
-                # regret_quad = (rho / 2.0) * ((positive_regrets ** 2).mean() +
-                #                              (positive_regrets.max(dim=0).values ** 2).mean()) / 2
 
             # Add batch to epoch stats
             regrets_epoch = torch.cat((regrets_epoch, regrets), dim=0)
             payments_epoch = torch.cat((payments_epoch, payments), dim=0)
-            # price_of_fair_epoch = torch.cat((price_of_fair_epoch, price_of_fair), dim=0)
 
             # Calculate loss
-            loss_func = regret_loss \
-                        + regret_quad \
-                        - payment_loss \
- \
-                # update model
+            loss_func = regret_loss + regret_quad - payment_loss
+
+            # update model
             optimizer.zero_grad()
             loss_func.backward()
             optimizer.step()
@@ -190,30 +186,27 @@ def train_loop(
         # Log training stats
         train_stats = {
             "regret_max": regrets_epoch.max().item(),
-            # "regret_min": regrets_epoch.min().item(),
             "regret_mean": regrets_epoch.mean().item(),
             "regret_mults": regret_mults,
-            # "payment_max": payments_epoch.sum(dim=1).max().item(),
-            # "payment_min": payments_epoch.sum(dim=1).min().item(),
             "payment": payments_epoch.sum(dim=1).mean().item(),
         }
+
+        # append metrics to lists
+        mean_regrets.append(regrets_epoch.mean().item())
+        mean_payments.append(payments_epoch.sum(dim=1).mean().item())
+        lagrange_mults.append(regret_mults)
         print(train_stats)
 
-        mult_stats = {
-            "regret_mult": regret_mults.mean().item(),
-            # "regret_rho": rho,
-            "payment_mult": payment_mult,
-        }
+    return mean_regrets, mean_payments, lagrange_mults
 
 
 def train_loop_no_lagrange(
-        model, train_loader, args, device='cpu'
+    model, train_loader, args, device='cpu'
 ):
     payment_mult = 1
     optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
 
     iter = 0
-
     for epoch in tqdm(range(args.num_epochs)):
         regrets_epoch = torch.Tensor().to(device)
         payments_epoch = torch.Tensor().to(device)
@@ -238,14 +231,10 @@ def train_loop_no_lagrange(
                 regret_loss = 0
             else:
                 regret_loss = torch.sqrt(positive_regrets.mean()) + positive_regrets.mean()
-                # regret_loss = (regret_mults * (positive_regrets + positive_regrets.max(dim=0).values) / 2).mean()
-                # regret_quad = (rho / 2.0) * ((positive_regrets ** 2).mean() +
-                #                              (positive_regrets.max(dim=0).values ** 2).mean()) / 2
 
             # Add batch to epoch stats
             regrets_epoch = torch.cat((regrets_epoch, regrets), dim=0)
             payments_epoch = torch.cat((payments_epoch, payments), dim=0)
-            # price_of_fair_epoch = torch.cat((price_of_fair_epoch, price_of_fair), dim=0)
 
             # Calculate loss
             loss_func = regret_loss - payment_loss
@@ -258,11 +247,7 @@ def train_loop_no_lagrange(
         # Log training stats
         train_stats = {
             "regret_max": regrets_epoch.max().item(),
-            # "regret_min": regrets_epoch.min().item(),
             "regret_mean": regrets_epoch.mean().item(),
-
-            # "payment_max": payments_epoch.sum(dim=1).max().item(),
-            # "payment_min": payments_epoch.sum(dim=1).min().item(),
             "payment": payments_epoch.sum(dim=1).mean().item(),
         }
         print(train_stats)
@@ -291,16 +276,9 @@ def test_loop(model, loader, args, device='cpu'):
         test_payments = torch.cat((test_payments, payments), dim=0)
 
     mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
-    # mean_sq_regret = (test_regrets ** 2).sum(dim=1).mean(dim=0).item()
-    # regret_var = max(mean_sq_regret - mean_regret ** 2, 0)
     result = {
         "payment_mean": test_payments.sum(dim=1).mean(dim=0).item(),
-        # "regret_std": regret_var ** .5,
         "regret_mean": mean_regret,
         "regret_max": test_regrets.sum(dim=1).max().item(),
     }
-    # for i in range(model.n_agents):
-    #     agent_regrets = test_regrets[:, i]
-    #     result[f"regret_agt{i}_std"] = (((agent_regrets ** 2).mean() - agent_regrets.mean() ** 2) ** .5).item()
-    #     result[f"regret_agt{i}_mean"] = agent_regrets.mean().item()
     return result
