@@ -90,9 +90,9 @@ class DoubleNet(nn.Module):
         return allocs.view(-1, self.n_agents, self.n_items), payments
 
     def save(self, filename_prefix='./'):
-        torch.save(self.neural_net.state_dict(), filename_prefix + 'doublenet.pytorch')
-        torch.save(self.payment_net, filename_prefix + 'pay_net.pytorch')
-        torch.save(self.alloc_head, filename_prefix + 'alloc_head.pytorch')
+        torch.save(self.alloc_net.state_dict(), filename_prefix + 'alloc_net.pytorch')
+        torch.save(self.payment_net.state_dict(), filename_prefix + 'payment_net.pytorch')
+        
         params_dict = {
             'n_agents': self.n_agents,
             'n_items': self.n_items,
@@ -117,9 +117,8 @@ class DoubleNet(nn.Module):
             params_dict['sinkhorn_rounds'],
             params_dict['marginal_choice'],
         )
-        result.neural_net.load_state_dict(torch.load(filename_prefix + 'doublenet.pytorch'))
-        result.payment_net.load_state_dict(torch.load(filename_prefix + 'pay_net.pytorch'))
-        result.alloc_head.load_state_dict(torch.load(filename_prefix + 'alloc_head.pytorch'))
+        result.alloc_net.load_state_dict(torch.load(filename_prefix + 'alloc_net.pytorch'))
+        result.payment_net.load_state_dict(torch.load(filename_prefix + 'payment_net.pytorch'))
         return result
     
     
