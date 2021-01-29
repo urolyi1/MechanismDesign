@@ -14,7 +14,6 @@ class DoubleNet(nn.Module):
         self.n_agents = n_agents
         self.n_items = n_items
         self.n_allocs = 2
-        self.alloc_weights = nn.Parameter(torch.ones(self.n_allocs))
         self.item_ranges = item_ranges
         self.clamp_op = ds.get_clamp_op(item_ranges)
         self.marginal_choice = marginal_choice
@@ -29,6 +28,10 @@ class DoubleNet(nn.Module):
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
             nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
+        )
+        self.alloc_weights_net = nn.Sequential(
+            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_allocs), nn.Softmax(dim=-1)
         )
         if marginal_choice == 'unit':
             agents_marginal, items_marginal = generate_marginals(self.n_agents, self.n_items)
@@ -85,11 +88,12 @@ class DoubleNet(nn.Module):
         """
         X = bids.view(-1, self.n_agents * self.n_items)
         augmented = self.alloc_head(self.neural_network_forward(X)).view(-1, self.n_allocs, self.n_agents, self.n_items)
+        alloc_weights = self.alloc_weights_net(X)
 
         allocs = 0.0
-        for i, weight in zip(range(self.n_allocs), torch.softmax(self.alloc_weights, dim=0)):
+        for i in range(self.n_allocs):
             curr_augmented = augmented[..., i, :, :]
-            allocs += weight * self.bipartite_matching(curr_augmented).reshape(-1, self.n_agents * self.n_items)
+            allocs += alloc_weights[..., i].unsqueeze(-1) * self.bipartite_matching(curr_augmented).reshape(-1, self.n_agents * self.n_items)
         # allocs = self.bipartite_matching(augmented).reshape(-1, self.n_agents * self.n_items)
         # payments = (allocs * augmented).view(-1, self.n_agents, self.n_items).sum(dim=-1)
         payments = self.payment_net(X) * ((allocs * X).view(-1, self.n_agents, self.n_items).sum(dim=-1))
@@ -132,10 +136,7 @@ def train_loop(
 ):
     regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
     payment_mult = 1
-    optimizer = optim.Adam([
-        {'params': list(model.neural_net.parameters()) + list(model.alloc_head.parameters()) + list(model.payment_net.parameters())},
-        {'params': model.alloc_weights, 'lr':1e-2}
-    ], lr=args.model_lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
 
     iter = 0
     rho = args.rho
