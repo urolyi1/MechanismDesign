@@ -80,12 +80,8 @@ def log_sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=3):
 def generate_marginals(n_agents, n_items):
     main_agents = [1.0 for _ in range(n_agents)]
     main_items = [1.0 for _ in range(n_items)]
-    if n_agents > n_items:
-        main_items.append((n_agents - n_items) + 1.0)
-        main_agents.append(1.0)
-    else:
-        main_agents.append((n_items - n_agents) + 1.0)
-        main_items.append(1.0)
+    main_agents.append(float(n_items))
+    main_items.append(float(n_agents))
 
     assert sum(main_agents) == sum(main_items)
 
