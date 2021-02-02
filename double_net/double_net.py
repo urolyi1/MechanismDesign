@@ -76,6 +76,32 @@ class DoubleNet(nn.Module):
 
         return plan_without_dummies
 
+    def check_convergence(self, orig_bids):
+        with torch.no_grad():
+            X = orig_bids.view(-1, self.n_agents * self.n_items)
+            bids = self.neural_network_forward(X)
+
+            batch_size = bids.shape[0]
+            bids_matrix = bids.view(-1, self.n_agents, self.n_items)
+            padded = -torch.nn.functional.pad(
+                bids_matrix,
+                [0, 1, 0, 1],
+                mode='constant',
+                value=0
+            )  # pads column on right and row on bottom of zeros
+            agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
+            item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
+
+            plan = log_sinkhorn_plan(padded,
+                                     agent_tiled_marginals,
+                                     item_tiled_marginals,
+                                     rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
+
+            marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / agent_tiled_marginals, dim=-1).values
+            marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / item_tiled_marginals, dim=-1).values
+
+            return marginal_violation_agent, marginal_violation_item
+
     def forward(self, bids):
         """
         :param bids: bids from bidders on items [batch_size, n_agents, n_items]
