@@ -20,8 +20,8 @@ class DoubleNet(nn.Module):
         self.sinkhorn_rounds = sinkhorn_rounds
         
         self.alloc_net = nn.Sequential(
-            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
-            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items)
+            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128), 
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents * self.n_items),
         )
         self.payment_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
@@ -181,6 +181,87 @@ def train_loop(
                     regret_mults += rho * positive_regrets.mean(dim=0)
             if iter % args.rho_incr_iter == 0:
                 rho += args.rho_incr_amount
+
+        # Log training stats
+        train_stats = {
+            "regret_max": regrets_epoch.max().item(),
+            "regret_mean": regrets_epoch.mean().item(),
+            "regret_mults": regret_mults,
+            "payment": payments_epoch.sum(dim=1).mean().item(),
+        }
+
+        # append metrics to lists
+        mean_regrets.append(regrets_epoch.mean().item())
+        mean_payments.append(payments_epoch.sum(dim=1).mean().item())
+        lagrange_mults.append(regret_mults)
+        print(train_stats)
+
+    return mean_regrets, mean_payments, lagrange_mults
+
+
+def train_loop_sinkhorn_decay(
+    model, train_loader, args, device='cpu', decay_iter=1000, decay_mult = 0.9,
+):
+    regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
+    payment_mult = 1
+    optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
+
+    iter = 0
+    rho = args.rho
+
+    mean_regrets = []
+    mean_payments = []
+    lagrange_mults = []
+    for epoch in tqdm(range(args.num_epochs)):
+        regrets_epoch = torch.Tensor().to(device)
+        payments_epoch = torch.Tensor().to(device)
+
+        for i, batch in enumerate(train_loader):
+            iter += 1
+            batch = batch.to(device)
+            misreport_batch = batch.clone().detach().to(device)
+            utils.optimize_misreports(
+                model, batch, misreport_batch, misreport_iter=args.misreport_iter, lr=args.misreport_lr
+            )
+
+            allocs, payments = model(batch)
+            truthful_util = utils.calc_agent_util(batch, allocs, payments)
+            misreport_util = utils.tiled_misreport_util(misreport_batch, batch, model)
+            regrets = torch.clamp(misreport_util - truthful_util, min=0)
+            positive_regrets = torch.clamp_min(regrets, 0)
+
+            payment_loss = payments.sum(dim=1).mean() * payment_mult
+
+            if epoch < args.rgt_start:
+                regret_loss = 0
+                regret_quad = 0
+            else:
+                regret_loss = (regret_mults * positive_regrets).mean()
+                regret_quad = (rho / 2.0) * (positive_regrets ** 2).mean()
+
+            # Add batch to epoch stats
+            regrets_epoch = torch.cat((regrets_epoch, regrets), dim=0)
+            payments_epoch = torch.cat((payments_epoch, payments), dim=0)
+
+            # Calculate loss
+            loss_func = regret_loss + regret_quad - payment_loss
+
+            # update model
+            optimizer.zero_grad()
+            loss_func.backward()
+            optimizer.step()
+
+            # update various fancy multipliers
+            # if epoch >= args.rgt_start:
+            if iter % args.lagr_update_iter == 0:
+                with torch.no_grad():
+                    regret_mults += rho * positive_regrets.mean(dim=0)
+            if iter % args.rho_incr_iter == 0:
+                with torch.no_grad():
+                    rho += args.rho_incr_amount
+            if iter % decay_iter:
+                with torch.no_grad():
+                    model.sinkhorn_epsilon = model.sinkhorn_epsilon * decay_mult
 
         # Log training stats
         train_stats = {
