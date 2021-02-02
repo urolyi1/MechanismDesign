@@ -97,8 +97,8 @@ class DoubleNet(nn.Module):
                                      item_tiled_marginals,
                                      rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
 
-            marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / agent_tiled_marginals, dim=-1).values
-            marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / item_tiled_marginals, dim=-1).values
+            marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / (agent_tiled_marginals + 1e-6), dim=-1).values
+            marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / (item_tiled_marginals + 1e-6), dim=-1).values
 
             return marginal_violation_agent, marginal_violation_item
 
