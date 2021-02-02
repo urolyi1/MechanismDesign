@@ -4,6 +4,8 @@ from torch import nn, optim
 import torch.nn.functional as F
 from double_net import utils_misreport as utils
 from double_net.utils_misreport import optimize_misreports, tiled_misreport_util, calc_agent_util
+from double_net import datasets as ds
+import pickle
 
 
 class View(nn.Module):
@@ -25,7 +27,7 @@ class View_Cut(nn.Module):
 
 class RegretNetUnitDemand(nn.Module):
     def __init__(
-            self, n_agents, n_items, clamp_op=None, hidden_layer_size=128,
+            self, n_agents, n_items, item_ranges, hidden_layer_size=128,
             n_hidden_layers=2, activation='tanh', separate=False
     ):
         super(RegretNetUnitDemand, self).__init__()
@@ -35,8 +37,8 @@ class RegretNetUnitDemand(nn.Module):
         else:
             self.act = nn.ReLU
 
-        self.clamp_op = clamp_op
-
+        self.item_ranges = item_ranges
+        self.clamp_op = ds.get_clamp_op(item_ranges)
         self.n_agents = n_agents
         self.n_items = n_items
 
@@ -49,15 +51,14 @@ class RegretNetUnitDemand(nn.Module):
         self.allocations_size = (self.n_agents + 1) * (self.n_items + 1)
         self.payments_size = self.n_agents
 
-        self.nn_model = nn.Sequential(
-            *([nn.Linear(self.input_size, self.hidden_layer_size), self.act()] +
-              [l for i in range(self.n_hidden_layers)
-               for l in (nn.Linear(self.hidden_layer_size, self.hidden_layer_size), self.act())])
+        self.alloc_net = nn.Sequential(
+            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.allocations_size*2)
         )
 
-        self.allocation_head = nn.Linear(self.hidden_layer_size, self.allocations_size * 2)
-        self.fractional_payment_head = nn.Sequential(
-            nn.Linear(self.hidden_layer_size, self.payments_size), nn.Sigmoid()
+        self.payment_net = nn.Sequential(
+            nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128),
+            nn.Tanh(), nn.Linear(128, 128), nn.Tanh(), nn.Linear(128, self.n_agents), nn.Sigmoid()
         )
 
     def glorot_init(self):
@@ -73,9 +74,9 @@ class RegretNetUnitDemand(nn.Module):
 
     def forward(self, reports):
         x = reports.view(-1, self.n_agents * self.n_items)
-        x = self.nn_model(x)
+        # x = self.nn_model(x)
 
-        alloc_scores = self.allocation_head(x)
+        alloc_scores = self.alloc_net(x)
         alloc_first = F.softmax(alloc_scores[:, 0:self.allocations_size].view(-1, self.n_agents + 1, self.n_items + 1),
                                 dim=1)
         alloc_second = F.softmax(
@@ -83,12 +84,38 @@ class RegretNetUnitDemand(nn.Module):
                                                                                   self.n_items + 1), dim=2)
         allocs = torch.min(alloc_first, alloc_second)
 
-        payments = self.fractional_payment_head(x) * torch.sum(
+        payments = self.payment_net(x) * torch.sum(
             allocs[:, :-1, :-1] * reports, dim=2
         )
 
         return allocs[:, :-1, :-1], payments
 
+    def save(self, filename_prefix='./'):
+
+        torch.save(self.alloc_net.state_dict(), filename_prefix + 'alloc_net.pytorch')
+        torch.save(self.payment_net.state_dict(), filename_prefix + 'payment_net.pytorch')
+
+        params_dict = {
+            'n_agents': self.n_agents,
+            'n_items': self.n_items,
+            'item_ranges': self.item_ranges,
+        }
+        with open(filename_prefix + 'regretnetunitdemand_classvariables.pickle', 'wb') as f:
+            pickle.dump(params_dict, f)
+
+    @staticmethod
+    def load(filename_prefix):
+        with open(filename_prefix + 'regretnetunitdemand_classvariables.pickle', 'rb') as f:
+            params_dict = pickle.load(f)
+
+        result = RegretNetUnitDemand(
+            params_dict['n_agents'],
+            params_dict['n_items'],
+            params_dict['item_ranges'],
+        )
+        result.alloc_net.load_state_dict(torch.load(filename_prefix + 'alloc_net.pytorch'))
+        result.payment_net.load_state_dict(torch.load(filename_prefix + 'payment_net.pytorch'))
+        return result
 
 class RegretNet(nn.Module):
     def __init__(self, n_agents, n_items, hidden_layer_size=128, clamp_op=None, n_hidden_layers=2,
