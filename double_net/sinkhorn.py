@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import logging
 
 
 def sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=2, debug=False):
@@ -64,6 +65,39 @@ def generate_exact_one_marginals(n_agents, n_items):
     assert sum(agent_demands) == sum(item_supplies)
     
     return torch.tensor(agent_demands).float(), torch.tensor(item_supplies).float()
+
+
+def compute_sinkhorn_max_error(plan: torch.Tensor, a: torch.Tensor, b: torch.Tensor, tol: float) -> float:
+    a_max_err = torch.max(torch.abs(plan.sum(dim=-1) - a) / a).item()
+    b_max_err = torch.max(torch.abs(plan.sum(dim=-2) - b) / b).item()
+
+    return max(a_max_err, b_max_err)
+
+
+def log_sinkhorn_plan_tolerance(dist_mat, a, b, epsilon=1e-1, tol=3):
+
+    def sinkhorn_error(dist_mat, f, g, b):
+        plan_marginals = torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon).sum(dim=-1)
+        return torch.max(torch.abs(plan_marginals - a) / a).item()
+
+    v = torch.ones_like(b)
+    g = epsilon * torch.log(v)
+    f = torch.zeros_like(a)
+    err = sinkhorn_error(dist_mat, f, g, b)
+    iters = 0
+    while err >= tol:
+        f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None, :]) / epsilon, dim=-1) + \
+            epsilon * torch.log(a)
+        g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None]) / epsilon, dim=-2) + \
+            epsilon * torch.log(b)
+        with torch.no_grad():
+            err = sinkhorn_error(dist_mat, f, g, b)
+        iters += 1
+
+    logging.info(f"sinkhorn took {iters} iterations to hit tolerance of {tol} on batch of size {dist_mat.shape[0]}")
+
+    return torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon)
+
 
 def log_sinkhorn_plan(dist_mat, a, b, epsilon=1e-1, rounds=3):
     v = torch.ones_like(b)
