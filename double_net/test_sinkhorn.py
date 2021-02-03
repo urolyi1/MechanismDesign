@@ -1,5 +1,5 @@
 from double_net.sinkhorn import generate_marginals, sinkhorn_plan, log_sinkhorn_plan, log_sinkhorn_plan_tolerance, \
-    compute_sinkhorn_max_error
+    compute_sinkhorn_max_error, sinkhorn_eps_scale
 import torch
 
 def test_log_sinkhorn():
@@ -25,8 +25,8 @@ def test_sinkhorn_tol():
     bids_mat = torch.rand(batch_size, 3, 4)
     a_marginals, b_marginals = generate_marginals(2, 3)
 
-    plan = sinkhorn_plan(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), rounds=100, epsilon=1e-1)
-    log_plan = log_sinkhorn_plan_tolerance(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), epsilon=1e-1, tol=1e-4)
+    plan = sinkhorn_plan(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), rounds=100, epsilon=1e-2)
+    log_plan = log_sinkhorn_plan_tolerance(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), epsilon=1e-2, tol=1e-4)
 
     print(log_plan[0,:,:])
     print(plan[0,:,:])
@@ -39,3 +39,30 @@ def test_sinkhorn_tol():
 
     assert(compute_sinkhorn_max_error(log_plan, a_marginals, b_marginals, tol=1e-4) < 1e-4)
 
+def test_epsilon_scaling():
+    batch_size = 10
+    bids_mat = torch.rand(batch_size, 3, 4)
+    a_marginals, b_marginals = generate_marginals(2, 3)
+
+    plan = sinkhorn_plan(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), rounds=100, epsilon=1e-1)
+    log_plan = sinkhorn_eps_scale(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), start_eps=1.0, end_eps=1e-1, eps_steps=10, tol=1e-4)
+
+    print(log_plan[0,:,:])
+    print(plan[0,:,:])
+
+    print(log_plan[0,:,:].sum(dim=0))
+    print(log_plan[0,:,:].sum(dim=1))
+
+    print(a_marginals)
+    print(b_marginals)
+
+    assert(compute_sinkhorn_max_error(log_plan, a_marginals, b_marginals, tol=1e-4) < 1e-4)
+
+
+def test_sinkhorn_tol_grad():
+    batch_size = 10
+    bids_mat = torch.rand(batch_size, 3, 4, requires_grad=True)
+    a_marginals, b_marginals = generate_marginals(2, 3)
+    log_plan = sinkhorn_eps_scale(bids_mat, a_marginals.repeat(batch_size, 1), b_marginals.repeat(batch_size, 1), start_eps=1.0, end_eps=1e-1, eps_steps=10, tol=1e-4)
+
+    log_plan.sum().backward()

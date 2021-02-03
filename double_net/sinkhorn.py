@@ -79,6 +79,34 @@ def sinkhorn_error(dist_mat, f, g, a, epsilon):
     return torch.max(torch.abs(plan_marginals - a) / a).item()
 
 
+def sinkhorn_eps_scale(dist_mat, a, b, start_eps=1.0, end_eps=1e-1, eps_steps=10, tol=1e-1):
+    v = torch.ones_like(b)
+    g = start_eps * torch.log(v)
+    f = torch.zeros_like(a)
+
+    epsilon_vals = np.linspace(start_eps, end_eps, eps_steps)
+    total_iters = 0
+    for epsilon in epsilon_vals:
+        with torch.no_grad():
+            err = sinkhorn_error(dist_mat, f, g, a, epsilon)
+        iters = 0
+        while err >= tol:
+            f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None, :]) / epsilon, dim=-1) + \
+                epsilon * torch.log(a)
+            g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None]) / epsilon, dim=-2) + \
+                epsilon * torch.log(b)
+            with torch.no_grad():
+                err = sinkhorn_error(dist_mat, f, g, a, epsilon)
+            iters += 1
+            total_iters += 1
+
+        logging.info(f"scaled sinkhorn with {epsilon} took {iters} iterations to hit tolerance of {tol} on batch of size {dist_mat.shape[0]}")
+
+    logging.info(
+        f"scaled sinkhorn with end eps {end_eps} took {total_iters} in total to hit {tol} on batch of size {dist_mat.shape[0]}")
+    return torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / end_eps)
+
+
 def log_sinkhorn_plan_tolerance(dist_mat, a, b, epsilon=1e-1, tol=3):
     v = torch.ones_like(b)
     g = epsilon * torch.log(v)
