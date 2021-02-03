@@ -4,12 +4,12 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
-from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals
+from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals, log_sinkhorn_plan_tolerance
 from double_net import datasets as ds
 
 
 class DoubleNet(nn.Module):
-    def __init__(self, n_agents, n_items, item_ranges, sinkhorn_epsilon, sinkhorn_rounds, marginal_choice='unit'):
+    def __init__(self, n_agents, n_items, item_ranges, sinkhorn_epsilon, sinkhorn_tolerance, marginal_choice='unit'):
         super(DoubleNet, self).__init__()
         self.n_agents = n_agents
         self.n_items = n_items
@@ -17,7 +17,7 @@ class DoubleNet(nn.Module):
         self.clamp_op = ds.get_clamp_op(item_ranges)
         self.marginal_choice = marginal_choice
         self.sinkhorn_epsilon = sinkhorn_epsilon
-        self.sinkhorn_rounds = sinkhorn_rounds
+        self.sinkhorn_tolerance = sinkhorn_tolerance
         
         self.alloc_net = nn.Sequential(
             nn.Linear(self.n_agents * self.n_items, 128), nn.Tanh(), nn.Linear(128, 128), 
@@ -66,10 +66,10 @@ class DoubleNet(nn.Module):
         agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
         item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
 
-        plan = log_sinkhorn_plan(padded,
+        plan = log_sinkhorn_plan_tolerance(padded,
                                  agent_tiled_marginals,
                                  item_tiled_marginals,
-                                 rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
+                                 self.sinkhorn_epsilon, self.sinkhorn_tolerance)
 
         # chop off dummy allocations
         plan_without_dummies = plan[..., 0:-1, 0:-1]
@@ -97,8 +97,8 @@ class DoubleNet(nn.Module):
                                      item_tiled_marginals,
                                      rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
 
-            marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / agent_tiled_marginals, dim=-1).values
-            marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / item_tiled_marginals, dim=-1).values
+            marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / (agent_tiled_marginals + 1e-6), dim=-1).values
+            marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / (item_tiled_marginals + 1e-6), dim=-1).values
 
             return marginal_violation_agent, marginal_violation_item
 
