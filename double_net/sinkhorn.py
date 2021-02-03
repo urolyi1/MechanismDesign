@@ -74,16 +74,16 @@ def compute_sinkhorn_max_error(plan: torch.Tensor, a: torch.Tensor, b: torch.Ten
     return max(a_max_err, b_max_err)
 
 
+def sinkhorn_error(dist_mat, f, g, a, epsilon):
+    plan_marginals = torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon).sum(dim=-1)
+    return torch.max(torch.abs(plan_marginals - a) / a).item()
+
+
 def log_sinkhorn_plan_tolerance(dist_mat, a, b, epsilon=1e-1, tol=3):
-
-    def sinkhorn_error(dist_mat, f, g, b):
-        plan_marginals = torch.exp((-dist_mat + f[..., None] + g[..., None, :]) / epsilon).sum(dim=-1)
-        return torch.max(torch.abs(plan_marginals - a) / a).item()
-
     v = torch.ones_like(b)
     g = epsilon * torch.log(v)
     f = torch.zeros_like(a)
-    err = sinkhorn_error(dist_mat, f, g, b)
+    err = sinkhorn_error(dist_mat, f, g, a, epsilon)
     iters = 0
     while err >= tol:
         f = -epsilon * torch.logsumexp(-(dist_mat - g[..., None, :]) / epsilon, dim=-1) + \
@@ -91,7 +91,7 @@ def log_sinkhorn_plan_tolerance(dist_mat, a, b, epsilon=1e-1, tol=3):
         g = -epsilon * torch.logsumexp(-(dist_mat - f[..., None]) / epsilon, dim=-2) + \
             epsilon * torch.log(b)
         with torch.no_grad():
-            err = sinkhorn_error(dist_mat, f, g, b)
+            err = sinkhorn_error(dist_mat, f, g, a, epsilon)
         iters += 1
 
     logging.info(f"sinkhorn took {iters} iterations to hit tolerance of {tol} on batch of size {dist_mat.shape[0]}")
