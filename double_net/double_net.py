@@ -93,11 +93,11 @@ class DoubleNet(nn.Module):
             agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
             item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
 
-            plan = log_sinkhorn_plan(padded,
-                                     agent_tiled_marginals,
-                                     item_tiled_marginals,
-                                     rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
-
+            plan = sinkhorn_eps_scale(padded,
+                                      agent_tiled_marginals,
+                                      item_tiled_marginals,
+                                      start_eps=1.0, end_eps=self.sinkhorn_epsilon, eps_steps=10,
+                                      tol=self.sinkhorn_tolerance)
             marginal_violation_agent = torch.max((plan.sum(dim=-1) - agent_tiled_marginals) / (agent_tiled_marginals + 1e-6), dim=-1).values
             marginal_violation_item = torch.max((plan.sum(dim=-2) - item_tiled_marginals) / (item_tiled_marginals + 1e-6), dim=-1).values
 
@@ -125,7 +125,7 @@ class DoubleNet(nn.Module):
             'n_items': self.n_items,
             'item_ranges': self.item_ranges,
             'sinkhorn_epsilon': self.sinkhorn_epsilon,
-            'sinkhorn_rounds': self.sinkhorn_rounds,
+            'sinkhorn_tol': self.sinkhorn_tolerance,
             'marginal_choice': self.marginal_choice,
         }
         with open(filename_prefix + 'doublenet_classvariables.pickle', 'wb') as f:
@@ -141,7 +141,7 @@ class DoubleNet(nn.Module):
             params_dict['n_items'],
             params_dict['item_ranges'],
             params_dict['sinkhorn_epsilon'],
-            params_dict['sinkhorn_rounds'],
+            params_dict['sinkhorn_tol'],
             params_dict['marginal_choice'],
         )
         result.alloc_net.load_state_dict(torch.load(filename_prefix + 'alloc_net.pytorch'))
