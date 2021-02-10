@@ -4,7 +4,7 @@ from torch import nn
 from torch import optim
 from tqdm import tqdm
 from double_net import utils_misreport as utils
-from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals
+from double_net.sinkhorn import generate_marginals, log_sinkhorn_plan, generate_additive_marginals, generate_exact_one_marginals, sinkhorn_eps_scale
 from double_net import datasets as ds
 
 
@@ -66,10 +66,10 @@ class DoubleNet(nn.Module):
         agent_tiled_marginals = self.agents_marginal.repeat(batch_size, 1)
         item_tiled_marginals = self.items_marginal.repeat(batch_size, 1)
 
-        plan = log_sinkhorn_plan(padded,
+        plan = sinkhorn_eps_scale(padded,
                                  agent_tiled_marginals,
                                  item_tiled_marginals,
-                                 rounds=self.sinkhorn_rounds, epsilon=self.sinkhorn_epsilon)
+                                 1.0, self.sinkhorn_epsilon, self.sinkhorn_rounds, 0.01)
 
         # chop off dummy allocations
         plan_without_dummies = plan[..., 0:-1, 0:-1]
@@ -151,24 +151,24 @@ class DoubleNet(nn.Module):
 def train_loop(
     model, train_loader, args, device='cpu'
 ):
-    regret_mults = 5.0 * torch.ones((1, model.n_agents)).to(device)
+    regret_mults = 2.0 * torch.ones((1, model.n_agents)).to(device)
     payment_mult = 1
     optimizer = optim.Adam(model.parameters(), lr=args.model_lr)
 
     iter = 0
     rho = args.rho
-
+    batch_size = train_loader.batch_size
     mean_regrets = []
     mean_payments = []
     lagrange_mults = []
     for epoch in tqdm(range(args.num_epochs)):
         regrets_epoch = torch.Tensor().to(device)
         payments_epoch = torch.Tensor().to(device)
-
+        
         for i, batch in enumerate(train_loader):
             iter += 1
             batch = batch.to(device)
-            misreport_batch = batch.clone().detach().to(device)
+            misreport_batch = batch.clone().detach().requires_grad_(True)
             utils.optimize_misreports(
                 model, batch, misreport_batch, misreport_iter=args.misreport_iter, lr=args.misreport_lr
             )
@@ -207,7 +207,7 @@ def train_loop(
                     regret_mults += rho * positive_regrets.mean(dim=0)
             if iter % args.rho_incr_iter == 0:
                 rho += args.rho_incr_amount
-
+                
         # Log training stats
         train_stats = {
             "regret_max": regrets_epoch.max().item(),
