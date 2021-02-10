@@ -1,1 +1,0 @@
-{"main_lr": 0.005, "main_iter": 5, "init_iter": 100, "batchsize": 8, "nbatch": 2, "misreport_iter": 500, "misreport_lr": 0.25, "random_seed": 0, "control_strength": 0.01}
