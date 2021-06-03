@@ -141,7 +141,7 @@ class DoubleNet(nn.Module):
             params_dict['n_items'],
             params_dict['item_ranges'],
             params_dict['sinkhorn_epsilon'],
-            params_dict['sinkhorn_tol'],
+            0.01,
             params_dict['marginal_choice'],
         )
         result.alloc_net.load_state_dict(torch.load(filename_prefix + 'alloc_net.pytorch'))
@@ -419,7 +419,9 @@ def test_loop_random_start(model, loader, args, random_starts, device='cpu'):
     mean_regret = test_regrets.sum(dim=1).mean(dim=0).item()
     result = {
         "payment_mean": test_payments.sum(dim=1).mean(dim=0).item(),
+        "payment_std": test_payments.sum(dim=1).std(dim=0).item(),
         "regret_mean": mean_regret,
+        "regret_std": test_regrets.sum(dim=1).std(dim=0).item(),
         "regret_max": test_regrets.sum(dim=1).max().item(),
     }
     return result
